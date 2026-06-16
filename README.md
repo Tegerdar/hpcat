@@ -1,8 +1,8 @@
 # hpcat
 
-Modern HPC Cluster Administration & Telemetry
+HPC Administration & Telemetry Tool
 
-A lightweight Python CLI for querying GPU hardware metrics and compute node allocation state in Slurm-managed HPC clusters.
+A lightweight Python CLI for querying hardware metrics in Slurm-managed HPC clusters.
 
 ## Features
 
