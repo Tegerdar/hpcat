@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, nodes
+from hpcat.commands import gpu, nodes, cpu
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -42,8 +42,18 @@ GLOBAL FORMATTING OPTIONS:
         help="CPU and Memory allocation state via Slurm"
     )
 
+    parser_cpu = subparsers.add_parser(
+        "cpu",
+        help="CPU state"
+    )
+    parser_cpu.add_argument(
+        "-e", "--extended",
+        action="store_true",
+        help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
+    )
+
     # --- Standardized Output Formatting ---
-    for subp in [parser_gpu, parser_nodes]:
+    for subp in [parser_gpu, parser_nodes, parser_cpu]:
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
@@ -56,6 +66,8 @@ GLOBAL FORMATTING OPTIONS:
             sys.exit(gpu.execute(args))
         elif args.command == "nodes":
             sys.exit(nodes.execute(args))
+        elif args.command == "cpu":
+            sys.exit(cpu.execute(args))
     except KeyboardInterrupt:
         print("\nExecution interrupted by user.", file=sys.stderr)
         sys.exit(130)
