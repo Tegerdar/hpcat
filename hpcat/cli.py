@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, nodes, cpu, mem
+from hpcat.commands import gpu, cpu, mem
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -16,7 +16,7 @@ GLOBAL FORMATTING OPTIONS:
 
   Example: 
     hpcat gpu -j
-    hpcat nodes -p
+    hpcat cpu -p
         """
     )
     
@@ -31,17 +31,6 @@ GLOBAL FORMATTING OPTIONS:
         "gpu", 
         help="Real-time GPU hardware telemetry via SSH"
     )
-    parser_gpu.add_argument(
-        "-n", "--nodes", 
-        nargs="+", 
-        help="Bypass Slurm discovery and poll specific nodes"
-    )
-
-    parser_nodes = subparsers.add_parser(
-        "nodes", 
-        help="CPU and Memory allocation state via Slurm"
-    )
-
     parser_cpu = subparsers.add_parser(
         "cpu",
         help="CPU state"
@@ -58,7 +47,7 @@ GLOBAL FORMATTING OPTIONS:
     )
 
     # --- Standardized Output Formatting ---
-    for subp in [parser_gpu, parser_nodes, parser_cpu]:
+    for subp in [parser_gpu, parser_mem, parser_cpu]:
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
@@ -69,8 +58,6 @@ GLOBAL FORMATTING OPTIONS:
     try:
         if args.command == "gpu":
             sys.exit(gpu.execute(args))
-        elif args.command == "nodes":
-            sys.exit(nodes.execute(args))
         elif args.command == "cpu":
             sys.exit(cpu.execute(args))
         elif args.command == "mem":
