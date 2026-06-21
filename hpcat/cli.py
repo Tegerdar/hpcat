@@ -3,6 +3,7 @@ import sys
 
 from hpcat.commands import gpu, cpu, mem
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="hpcat: Modern HPC Cluster Administration & Telemetry",
@@ -31,9 +32,22 @@ GLOBAL FORMATTING OPTIONS:
         "gpu", 
         help="Real-time GPU hardware telemetry via SSH"
     )
+    parser_gpu.add_argument(
+        "-n", "--nodes",
+        nargs="+",
+        metavar="NODE",
+        help="List of nodes to target (overrides Slurm discovery)"
+    )
+
     parser_cpu = subparsers.add_parser(
         "cpu",
         help="CPU state"
+    )
+    parser_cpu.add_argument(
+        "-n", "--nodes",
+        nargs="+",
+        metavar="NODE",
+        help="List of nodes to target (overrides Slurm discovery)"
     )
     parser_cpu.add_argument(
         "-e", "--extended",
@@ -44,6 +58,12 @@ GLOBAL FORMATTING OPTIONS:
     parser_mem = subparsers.add_parser(
         "mem",
         help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
+    )
+    parser_mem.add_argument(
+        "-n", "--nodes",
+        nargs="+",
+        metavar="NODE",
+        help="List of nodes to target (overrides Slurm discovery)"
     )
 
     # --- Standardized Output Formatting ---
@@ -68,6 +88,7 @@ GLOBAL FORMATTING OPTIONS:
     except Exception as e:
         print(f"\nFatal error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
