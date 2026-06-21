@@ -1,13 +1,13 @@
 # hpcat/formatters/csv_out.py
 import io
 import csv
-import socket
 from typing import Dict, Any
+
 
 def render(data: Dict[str, Any], module: str) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
-    
+
     if module == "gpus" or module == "gpu":
         writer.writerow([
             "Node", "GPU_Index", "Model", "Util_Pct", 
@@ -24,31 +24,56 @@ def render(data: Dict[str, Any], module: str) -> str:
                 ])
 
     elif module == "cpu":
-        # Get the short hostname to match the GPU node format
-        node = socket.gethostname().split('.')[0]
-        
         writer.writerow([
             "Node", "Model", "Architecture", "CPUs", "Sockets", 
             "Cores_Per_Socket", "Threads_Per_Core", "NUMA_Nodes",
             "Slurm_Total", "Slurm_Load", "Slurm_State", "Error"
         ])
-        
-        if "error" in data:
-            writer.writerow([node, "", "", "", "", "", "", "", "", "", "", data["error"]])
-        else:
+
+        for node, node_data in sorted(data.items()):
+            if "error" in node_data:
+                writer.writerow([node, "", "", "", "", "", "", "", "", "", "", node_data["error"]])
+                continue
+
             writer.writerow([
                 node,
-                data.get("model_name", ""),
-                data.get("architecture", ""),
-                data.get("cpu(s)", ""),
-                data.get("socket(s)", ""),
-                data.get("core(s)_per_socket", ""),
-                data.get("thread(s)_per_core", ""),
-                data.get("numa_node(s)", ""),
-                data.get("slurm_cputot", ""),
-                data.get("slurm_cpuload", ""),
-                data.get("slurm_state", ""),
+                node_data.get("model_name", ""),
+                node_data.get("architecture", ""),
+                node_data.get("cpu(s)", ""),
+                node_data.get("socket(s)", ""),
+                node_data.get("core(s)_per_socket", ""),
+                node_data.get("thread(s)_per_core", ""),
+                node_data.get("numa_node(s)", ""),
+                node_data.get("slurm_cputot", ""),
+                node_data.get("slurm_cpuload", ""),
+                node_data.get("slurm_state", ""),
                 ""
             ])
-                
+
+    elif module == "memory" or module == "mem":
+        writer.writerow([
+            "Node", "OS_MemTotal_MB", "OS_MemAvailable_MB", "OS_MemFree_MB", "Buffers_MB", "Cached_MB",
+            "SwapTotal_MB", "SwapFree_MB", "Slurm_RealMemory_MB", "Slurm_AllocMem_MB", "Slurm_FreeMem_MB", "Error"
+        ])
+
+        for node, node_data in sorted(data.items()):
+            if "error" in node_data:
+                writer.writerow([node, "", "", "", "", "", "", "", "", "", "", node_data["error"]])
+                continue
+
+            writer.writerow([
+                node,
+                node_data.get("os_memtotal_mb", ""),
+                node_data.get("os_memavailable_mb", ""),
+                node_data.get("os_memfree_mb", ""),
+                node_data.get("os_buffers_mb", ""),
+                node_data.get("os_cached_mb", ""),
+                node_data.get("os_swaptotal_mb", ""),
+                node_data.get("os_swapfree_mb", ""),
+                node_data.get("slurm_realmemory", ""),
+                node_data.get("slurm_allocmem", ""),
+                node_data.get("slurm_freemem", ""),
+                ""
+            ])
+
     return output.getvalue().strip()
