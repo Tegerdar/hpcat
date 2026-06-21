@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, nodes, cpu
+from hpcat.commands import gpu, nodes, cpu, mem
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -52,6 +52,11 @@ GLOBAL FORMATTING OPTIONS:
         help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
     )
 
+    parser_mem = subparsers.add_parser(
+        "mem",
+        help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
+    )
+
     # --- Standardized Output Formatting ---
     for subp in [parser_gpu, parser_nodes, parser_cpu]:
         format_group = subp.add_mutually_exclusive_group()
@@ -68,6 +73,8 @@ GLOBAL FORMATTING OPTIONS:
             sys.exit(nodes.execute(args))
         elif args.command == "cpu":
             sys.exit(cpu.execute(args))
+        elif args.command == "mem":
+            sys.exit(mem.execute(args))
     except KeyboardInterrupt:
         print("\nExecution interrupted by user.", file=sys.stderr)
         sys.exit(130)
