@@ -57,7 +57,7 @@ GLOBAL FORMATTING OPTIONS:
 
     parser_mem = subparsers.add_parser(
         "mem",
-        help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
+        help="Memory usage and state"
     )
     parser_mem.add_argument(
         "-n", "--nodes",
