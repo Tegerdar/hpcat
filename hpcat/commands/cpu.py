@@ -7,9 +7,18 @@ from typing import List, Dict, Any, Tuple
 
 # Import the decoupled formatters
 from hpcat.formatters import json_out, csv_out, prometheus_out
+# Import security utilities
+from hpcat.security import (
+    validate_node_name,
+    validate_node_list,
+    build_ssh_command,
+    get_safe_error_message,
+    MAX_WORKERS_DEFAULT,
+    SSH_TIMEOUT_DEFAULT,
+)
 
-SSH_TIMEOUT = 3
-MAX_WORKERS = 30
+SSH_TIMEOUT = SSH_TIMEOUT_DEFAULT
+MAX_WORKERS = MAX_WORKERS_DEFAULT
 
 def get_cpu_nodes() -> List[str]:
     """Discover all compute nodes via Slurm."""
@@ -17,12 +26,27 @@ def get_cpu_nodes() -> List[str]:
         # -N (Node format), -h (no header), -o '%n' (node name only)
         result = subprocess.run(
             ['sinfo', '-N', '-h', '-o', '%n'],
-            capture_output=True, text=True, check=True
+            capture_output=True, text=True, check=True,
+            timeout=10  # Added timeout
         )
-        nodes = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+        nodes = []
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                try:
+                    validated_node = validate_node_name(line.strip())
+                    nodes.append(validated_node)
+                except ValueError:
+                    # Skip invalid node names
+                    continue
         return list(set(nodes))
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print(f"Slurm discovery failed: {e}", file=sys.stderr)
+        print(f"Slurm discovery failed: {get_safe_error_message(e, 'Slurm discovery')}", file=sys.stderr)
+        return []
+    except subprocess.TimeoutExpired:
+        print("Slurm discovery timed out", file=sys.stderr)
+        return []
+    except Exception as e:
+        print(f"Slurm discovery error: {get_safe_error_message(e, 'Slurm discovery')}", file=sys.stderr)
         return []
 
 def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
@@ -30,18 +54,22 @@ def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
     hw_data = {}
     slurm_data = {}
 
-    # 1. SSH to get lscpu hardware data
-    cmd = [
-        'ssh',
-        '-o', 'BatchMode=yes',
-        '-o', f'ConnectTimeout={SSH_TIMEOUT}',
-        '-o', 'StrictHostKeyChecking=no',
-        '-o', 'LogLevel=QUIET',
-        node,
-        'lscpu -J'
-    ]
-    
+    # Validate node name
     try:
+        validated_node = validate_node_name(node)
+    except ValueError as e:
+        return node, {"error": str(e)}
+
+    # 1. SSH to get lscpu hardware data
+    try:
+        cmd = build_ssh_command(
+            validated_node,
+            'lscpu -J',
+            timeout=SSH_TIMEOUT,
+            batch_mode=True,
+            quiet=True
+        )
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_TIMEOUT + 2)
         if result.returncode != 0:
             hw_data = {"error": "ssh_auth_or_lscpu_failed"}
@@ -58,12 +86,19 @@ def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
                     hw_data[field] = item.get('data')
     except subprocess.TimeoutExpired:
         hw_data = {"error": "timeout"}
+    except json.JSONDecodeError:
+        hw_data = {"error": "lscpu_parse_failed"}
     except Exception as e:
-        hw_data = {"error": str(e)}
+        hw_data = {"error": get_safe_error_message(e, 'CPU hardware polling')}
 
     # 2. Query Slurm state for this node (runs locally on the execution node)
     try:
-        sctrl_result = subprocess.run(['scontrol', 'show', 'node', node], capture_output=True, text=True)
+        sctrl_result = subprocess.run(
+            ['scontrol', 'show', 'node', validated_node], 
+            capture_output=True, 
+            text=True,
+            timeout=10
+        )
         if sctrl_result.returncode == 0:
             target_keys = {'State', 'CPUTot', 'CPULoad', 'AllocCPUs', 'IdleCPUs'}
             for word in sctrl_result.stdout.split():
@@ -73,15 +108,30 @@ def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
                         slurm_data[f"slurm_{key.lower()}"] = value
         else:
             slurm_data = {"slurm_status": "Not in Slurm"}
+    except subprocess.TimeoutExpired:
+        slurm_data = {"slurm_error": "timeout"}
     except Exception as e:
-        slurm_data = {"slurm_error": str(e)}
+        slurm_data = {"slurm_error": get_safe_error_message(e, 'Slurm query')}
 
     combined_data = {**hw_data, **slurm_data}
     return node, combined_data
 
 def execute(args: Any) -> int:
     """Main execution router for the cpu subcommand."""
-    target_nodes = args.nodes if getattr(args, 'nodes', None) else get_cpu_nodes()
+    try:
+        # Validate user-provided nodes if specified
+        if args.nodes:
+            try:
+                target_nodes = validate_node_list(args.nodes)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
+        else:
+            target_nodes = get_cpu_nodes()
+    except Exception as e:
+        print(f"Error validating nodes: {get_safe_error_message(e, 'Node validation')}", file=sys.stderr)
+        return 1
+    
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1

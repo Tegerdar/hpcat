@@ -5,9 +5,18 @@ from typing import List, Dict, Any, Tuple
 
 # Import the decoupled formatters
 from hpcat.formatters import json_out, csv_out, prometheus_out
+# Import security utilities
+from hpcat.security import (
+    validate_node_name,
+    validate_node_list,
+    build_ssh_command,
+    get_safe_error_message,
+    MAX_WORKERS_DEFAULT,
+    SSH_TIMEOUT_DEFAULT,
+)
 
-SSH_TIMEOUT = 3
-MAX_WORKERS = 30
+SSH_TIMEOUT = SSH_TIMEOUT_DEFAULT
+MAX_WORKERS = MAX_WORKERS_DEFAULT
 NVIDIA_SMI_CMD = (
     "nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,"
     "memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits"
@@ -18,60 +27,112 @@ def get_gpu_nodes() -> List[str]:
     try:
         result = subprocess.run(
             ['sinfo', '-N', '-h', '-o', '%n|%G'],
-            capture_output=True, text=True, check=True
+            capture_output=True, text=True, check=True,
+            timeout=10  # Added timeout for Slurm commands
         )
         nodes = []
         for line in result.stdout.strip().split('\n'):
             if not line:
                 continue
-            node, gres = line.split('|', 1)
+            parts = line.split('|', 1)
+            if len(parts) != 2:
+                continue
+            node, gres = parts
             if 'gpu' in gres.lower():
-                nodes.append(node.strip())
+                try:
+                    validated_node = validate_node_name(node.strip())
+                    nodes.append(validated_node)
+                except ValueError:
+                    # Skip invalid node names from Slurm output
+                    continue
         return list(set(nodes))
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print(f"Slurm discovery failed: {e}", file=sys.stderr)
+        print(f"Slurm discovery failed: {get_safe_error_message(e, 'Slurm discovery')}", file=sys.stderr)
+        return []
+    except subprocess.TimeoutExpired:
+        print("Slurm discovery timed out", file=sys.stderr)
+        return []
+    except Exception as e:
+        print(f"Slurm discovery error: {get_safe_error_message(e, 'Slurm discovery')}", file=sys.stderr)
         return []
 
 def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
     """Fetch real-time GPU metrics via SSH."""
-    cmd = [
-        'ssh',
-        '-o', 'BatchMode=yes',
-        '-o', f'ConnectTimeout={SSH_TIMEOUT}',
-        '-o', 'StrictHostKeyChecking=no',
-        '-o', 'LogLevel=QUIET',
-        node,
-        NVIDIA_SMI_CMD
-    ]
+    try:
+        # Validate node name
+        validated_node = validate_node_name(node)
+    except ValueError as e:
+        return node, {"error": str(e)}
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_TIMEOUT + 2)
+        # Build secure SSH command
+        cmd = build_ssh_command(
+            validated_node,
+            NVIDIA_SMI_CMD,
+            timeout=SSH_TIMEOUT,
+            batch_mode=True,
+            quiet=True
+        )
+        
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=SSH_TIMEOUT + 2
+        )
+        
         if result.returncode != 0:
-            return node, {"error": "ssh_auth_or_smi_failed"}
+            # Provide safe error message based on return code
+            if result.returncode == 255:
+                error_msg = "ssh_auth_or_connection_failed"
+            elif result.returncode == 127:
+                error_msg = "nvidia_smi_not_found"
+            else:
+                error_msg = "ssh_command_failed"
+            return node, {"error": error_msg}
         
         gpus = []
         for line in result.stdout.strip().split('\n'):
             if not line:
                 continue
             parts = [p.strip() for p in line.split(',')]
-            gpus.append({
-                "index": int(parts[0]),
-                "model": parts[1].replace('"', ''),
-                "util_pct": float(parts[2]) if parts[2] != '[Not Supported]' else 0.0,
-                "mem_used_mb": float(parts[3]),
-                "mem_total_mb": float(parts[4]),
-                "temp_c": float(parts[5]),
-                "power_w": float(parts[6]) if parts[6] != '[Not Supported]' else 0.0
-            })
+            if len(parts) < 7:
+                continue
+            try:
+                gpus.append({
+                    "index": int(parts[0]),
+                    "model": parts[1].replace('"', ''),
+                    "util_pct": float(parts[2]) if parts[2] != '[Not Supported]' else 0.0,
+                    "mem_used_mb": float(parts[3]),
+                    "mem_total_mb": float(parts[4]),
+                    "temp_c": float(parts[5]),
+                    "power_w": float(parts[6]) if parts[6] != '[Not Supported]' else 0.0
+                })
+            except (ValueError, IndexError):
+                # Skip malformed GPU data
+                continue
         return node, {"gpus": gpus}
     except subprocess.TimeoutExpired:
         return node, {"error": "timeout"}
     except Exception as e:
-        return node, {"error": str(e)}
+        return node, {"error": get_safe_error_message(e, 'GPU polling')}
 
 def execute(args: Any) -> int:
     """Main execution router for the gpu subcommand."""
-    target_nodes = args.nodes if args.nodes else get_gpu_nodes()
+    try:
+        # Validate user-provided nodes if specified
+        if args.nodes:
+            try:
+                target_nodes = validate_node_list(args.nodes)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
+        else:
+            target_nodes = get_gpu_nodes()
+    except Exception as e:
+        print(f"Error validating nodes: {get_safe_error_message(e, 'Node validation')}", file=sys.stderr)
+        return 1
+    
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
@@ -91,7 +152,6 @@ def execute(args: Any) -> int:
     elif getattr(args, 'json', False):
         print(json_out.render(cluster_state, module="gpus"))
     else:
-        # FIXED: Now correctly falls back to the human-readable table
         print_console(cluster_state)
         
     return 0
@@ -113,6 +173,6 @@ def print_console(data: Dict[str, Dict[str, Any]]) -> None:
             util = f"{gpu['util_pct']:.1f}%"
             print(
                 f"{node:<12} | {gpu['index']:<3} | {gpu['model']:<20} | "
-                f"{util:>6} | {vram:<13} | {gpu['temp_c']:>2.0f}°C | {gpu['power_w']:>5.1f}W"
+                f"{util:>6} | {vram:<13} | {gpu['temp_c']:>2.0f}c | {gpu['power_w']:>5.1f}W"
             )
     print("=" * 95)
