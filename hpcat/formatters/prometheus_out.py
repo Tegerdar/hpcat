@@ -66,6 +66,53 @@ def render(data: Dict[str, Any], module: str) -> str:
         add_metric("hpcat_slurm_cpu_total", "Total CPUs allocated to Slurm", "gauge", slurm_total)
         add_metric("hpcat_slurm_cpu_load", "Current Slurm CPU Load", "gauge", slurm_load)
 
+    # Network section: per-port IB/RoCE link state + key ethtool error counters
+    elif module == "network":
+        link_up: List[Tuple[str, float]] = []
+        out_of_buffer: List[Tuple[str, float]] = []
+        crc_errors: List[Tuple[str, float]] = []
+        symbol_errors: List[Tuple[str, float]] = []
+        rx_discards: List[Tuple[str, float]] = []
+        tx_discards: List[Tuple[str, float]] = []
+        link_down_events: List[Tuple[str, float]] = []
+        pause_active: List[Tuple[str, float]] = []
+
+        def to_float(val: Any, default: float = 0.0) -> float:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+
+        for node, node_data in data.items():
+            if "error" in node_data:
+                continue
+            netdevs = node_data.get("netdevs", {})
+            for p in node_data.get("ports", []):
+                nd = p["netdev"]
+                lbl = f'node="{node}",device="{p["device"]}",netdev="{nd}",link_layer="{p["link_layer"]}"'
+                link_up.append((lbl, 1.0 if p["state"] == "ACTIVE" else 0.0))
+
+                stats = netdevs.get(nd, {}).get("stats", {}) if nd != "-" else {}
+                if not stats:
+                    continue
+                out_of_buffer.append((lbl, to_float(stats.get("rx_out_of_buffer"))))
+                crc_errors.append((lbl, to_float(stats.get("rx_crc_errors_phy"))))
+                symbol_errors.append((lbl, to_float(stats.get("rx_symbol_err_phy"))))
+                rx_discards.append((lbl, to_float(stats.get("rx_discards_phy"))))
+                tx_discards.append((lbl, to_float(stats.get("tx_discards_phy"))))
+                link_down_events.append((lbl, to_float(stats.get("link_down_events_phy"))))
+                pause_on = to_float(stats.get("rx_pause_ctrl_phy")) > 0 or to_float(stats.get("tx_pause_ctrl_phy")) > 0
+                pause_active.append((lbl, 1.0 if pause_on else 0.0))
+
+        add_metric("hpcat_ib_port_link_up", "1 if port state is ACTIVE, else 0", "gauge", link_up)
+        add_metric("hpcat_net_rx_out_of_buffer_total", "RX ring buffer overflow count", "counter", out_of_buffer)
+        add_metric("hpcat_net_rx_crc_errors_phy_total", "PHY-level RX CRC errors", "counter", crc_errors)
+        add_metric("hpcat_net_rx_symbol_errors_phy_total", "PHY-level RX symbol errors", "counter", symbol_errors)
+        add_metric("hpcat_net_rx_discards_phy_total", "PHY-level RX discards", "counter", rx_discards)
+        add_metric("hpcat_net_tx_discards_phy_total", "PHY-level TX discards", "counter", tx_discards)
+        add_metric("hpcat_net_link_down_events_phy_total", "PHY-level link down event count", "counter", link_down_events)
+        add_metric("hpcat_net_pause_frames_active", "1 if RX or TX pause frames observed, else 0", "gauge", pause_active)
+
     # Memory section: export OS and Slurm memory metrics per-node (MB -> bytes)
     elif module in ("memory", "mem"):
         os_total: List[Tuple[str, float]] = []

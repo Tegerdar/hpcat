@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, cpu, mem
+from hpcat.commands import gpu, cpu, mem, network
 
 
 def main() -> None:
@@ -66,8 +66,30 @@ GLOBAL FORMATTING OPTIONS:
         help="List of nodes to target (overrides Slurm discovery)"
     )
 
+    parser_network = subparsers.add_parser(
+        "network",
+        help="InfiniBand/RoCE link state and NIC error counters"
+    )
+    parser_network.add_argument(
+        "-n", "--nodes",
+        nargs="+",
+        metavar="NODE",
+        help="List of nodes to target (overrides Slurm discovery)"
+    )
+    parser_network.add_argument(
+        "-e", "--extended",
+        action="store_true",
+        help="Include full per-netdev counters and interface details"
+    )
+    parser_network.add_argument(
+        "-d", "--delta",
+        action="store_true",
+        help="Show counter change since the last 'network' run (snapshot-based; "
+             "first run establishes the baseline)"
+    )
+
     # --- Standardized Output Formatting ---
-    for subp in [parser_gpu, parser_mem, parser_cpu]:
+    for subp in [parser_gpu, parser_mem, parser_cpu, parser_network]:
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
@@ -82,6 +104,8 @@ GLOBAL FORMATTING OPTIONS:
             sys.exit(cpu.execute(args))
         elif args.command == "mem":
             sys.exit(mem.execute(args))
+        elif args.command == "network":
+            sys.exit(network.execute(args))
     except KeyboardInterrupt:
         print("\nExecution interrupted by user.", file=sys.stderr)
         sys.exit(130)

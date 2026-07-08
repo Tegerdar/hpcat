@@ -50,6 +50,42 @@ def render(data: Dict[str, Any], module: str) -> str:
                 ""
             ])
 
+    elif module == "network":
+        writer.writerow([
+            "Node", "Device", "Netdev", "Link_State", "Phys_State", "Link_Layer", "Rate",
+            "RX_Out_Of_Buffer", "RX_CRC_Errors_Phy", "RX_Symbol_Err_Phy",
+            "RX_Discards_Phy", "TX_Discards_Phy", "RX_Pause_Ctrl_Phy", "TX_Pause_Ctrl_Phy",
+            "Link_Down_Events_Phy", "Error"
+        ])
+
+        for node, node_data in sorted(data.items()):
+            if "error" in node_data:
+                writer.writerow([node] + [""] * 14 + [node_data["error"]])
+                continue
+
+            ports = node_data.get("ports", [])
+            netdevs = node_data.get("netdevs", {})
+
+            if not ports:
+                writer.writerow([node] + [""] * 14 + ["no_ib_or_roce_devices"])
+                continue
+
+            for p in ports:
+                nd = p["netdev"]
+                stats = netdevs.get(nd, {}).get("stats", {}) if nd != "-" else {}
+                writer.writerow([
+                    node, p["device"], nd, p["state"], p["phys_state"], p["link_layer"], p["rate"],
+                    stats.get("rx_out_of_buffer", ""),
+                    stats.get("rx_crc_errors_phy", ""),
+                    stats.get("rx_symbol_err_phy", ""),
+                    stats.get("rx_discards_phy", ""),
+                    stats.get("tx_discards_phy", ""),
+                    stats.get("rx_pause_ctrl_phy", ""),
+                    stats.get("tx_pause_ctrl_phy", ""),
+                    stats.get("link_down_events_phy", ""),
+                    ""
+                ])
+
     elif module == "memory" or module == "mem":
         writer.writerow([
             "Node", "OS_MemTotal_MB", "OS_MemAvailable_MB", "OS_MemFree_MB", "Buffers_MB", "Cached_MB",
