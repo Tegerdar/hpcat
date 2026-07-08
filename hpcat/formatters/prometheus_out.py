@@ -113,6 +113,52 @@ def render(data: Dict[str, Any], module: str) -> str:
         add_metric("hpcat_net_link_down_events_phy_total", "PHY-level link down event count", "counter", link_down_events)
         add_metric("hpcat_net_pause_frames_active", "1 if RX or TX pause frames observed, else 0", "gauge", pause_active)
 
+    # Storage section: mount-level usage plus BeeGFS/Lustre target free%
+    elif module == "storage":
+        mount_use_pct: List[Tuple[str, float]] = []
+        mount_avail_bytes: List[Tuple[str, float]] = []
+        beegfs_free_pct: List[Tuple[str, float]] = []
+        lustre_use_pct: List[Tuple[str, float]] = []
+
+        def to_float(val: Any, default: float = 0.0) -> float:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+
+        for node, node_data in data.items():
+            if "error" in node_data:
+                continue
+
+            for m in node_data.get("mounts", []):
+                lbl = f'node="{node}",mountpoint="{m["mountpoint"]}",fstype="{m["fstype"]}"'
+                pcent = str(m.get("pcent", "")).rstrip('%')
+                mount_use_pct.append((lbl, to_float(pcent, -1.0)))
+                try:
+                    avail_bytes = int(m["avail_1k"]) * 1024.0
+                    mount_avail_bytes.append((lbl, avail_bytes))
+                except (ValueError, KeyError):
+                    pass
+
+            beegfs = node_data.get("beegfs", {})
+            for kind, rows in (("meta", beegfs.get("meta", [])), ("storage", beegfs.get("storage", []))):
+                for r in rows:
+                    if "target_id" not in r:
+                        continue
+                    lbl = f'node="{node}",target_id="{r["target_id"]}",kind="{kind}",pool="{r["pool"]}"'
+                    beegfs_free_pct.append((lbl, to_float(r.get("free_pct"))))
+
+            for r in node_data.get("lustre", []):
+                if "target" not in r:
+                    continue
+                lbl = f'node="{node}",target="{r["target"]}"'
+                lustre_use_pct.append((lbl, to_float(r.get("use_pct"))))
+
+        add_metric("hpcat_storage_mount_use_percent", "Filesystem use percentage (df)", "gauge", mount_use_pct)
+        add_metric("hpcat_storage_mount_available_bytes", "Filesystem available space (bytes)", "gauge", mount_avail_bytes)
+        add_metric("hpcat_beegfs_target_free_percent", "BeeGFS target free space percentage", "gauge", beegfs_free_pct)
+        add_metric("hpcat_lustre_target_use_percent", "Lustre target (MDT/OST) use percentage", "gauge", lustre_use_pct)
+
     # Memory section: export OS and Slurm memory metrics per-node (MB -> bytes)
     elif module in ("memory", "mem"):
         os_total: List[Tuple[str, float]] = []

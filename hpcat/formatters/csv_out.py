@@ -86,6 +86,50 @@ def render(data: Dict[str, Any], module: str) -> str:
                     ""
                 ])
 
+    elif module == "storage":
+        writer.writerow([
+            "Node", "Mountpoint", "FSType", "Size_GB", "Used_GB", "Avail_GB", "Use_Pct",
+            "BeeGFS_Target", "BeeGFS_Kind", "BeeGFS_Pool", "BeeGFS_FreePct",
+            "Lustre_Target", "Lustre_UsePct", "Error"
+        ])
+
+        for node, node_data in sorted(data.items()):
+            if "error" in node_data:
+                writer.writerow([node] + [""] * 12 + [node_data["error"]])
+                continue
+
+            for m in node_data.get("mounts", []):
+                try:
+                    size_gb = round(int(m["blocks_1k"]) / (1024 * 1024), 2)
+                    used_gb = round(int(m["used_1k"]) / (1024 * 1024), 2)
+                    avail_gb = round(int(m["avail_1k"]) / (1024 * 1024), 2)
+                except (ValueError, KeyError):
+                    size_gb = used_gb = avail_gb = ""
+                writer.writerow([
+                    node, m["mountpoint"], m["fstype"], size_gb, used_gb, avail_gb, m["pcent"],
+                    "", "", "", "", "", "", ""
+                ])
+
+            beegfs = node_data.get("beegfs", {})
+            for kind, rows in (("meta", beegfs.get("meta", [])), ("storage", beegfs.get("storage", []))):
+                for r in rows:
+                    if "target_id" not in r:
+                        continue
+                    writer.writerow([
+                        node, "", "", "", "", "", "",
+                        r["target_id"], kind, r["pool"], r["free_pct"],
+                        "", "", ""
+                    ])
+
+            for r in node_data.get("lustre", []):
+                if "target" not in r:
+                    continue
+                writer.writerow([
+                    node, "", "", "", "", "", "",
+                    "", "", "", "",
+                    r["target"], r.get("use_pct", ""), ""
+                ])
+
     elif module == "memory" or module == "mem":
         writer.writerow([
             "Node", "OS_MemTotal_MB", "OS_MemAvailable_MB", "OS_MemFree_MB", "Buffers_MB", "Cached_MB",

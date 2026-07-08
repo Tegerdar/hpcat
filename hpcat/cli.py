@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, cpu, mem, network
+from hpcat.commands import gpu, cpu, mem, network, storage
 
 
 def main() -> None:
@@ -88,8 +88,24 @@ GLOBAL FORMATTING OPTIONS:
              "first run establishes the baseline)"
     )
 
+    parser_storage = subparsers.add_parser(
+        "storage",
+        help="Filesystem usage (df) plus BeeGFS/Lustre target-level detail"
+    )
+    parser_storage.add_argument(
+        "-n", "--nodes",
+        nargs="+",
+        metavar="NODE",
+        help="List of nodes to target (overrides Slurm discovery)"
+    )
+    parser_storage.add_argument(
+        "-e", "--extended",
+        action="store_true",
+        help="Include full per-mount raw details"
+    )
+
     # --- Standardized Output Formatting ---
-    for subp in [parser_gpu, parser_mem, parser_cpu, parser_network]:
+    for subp in [parser_gpu, parser_mem, parser_cpu, parser_network, parser_storage]:
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
@@ -106,6 +122,8 @@ GLOBAL FORMATTING OPTIONS:
             sys.exit(mem.execute(args))
         elif args.command == "network":
             sys.exit(network.execute(args))
+        elif args.command == "storage":
+            sys.exit(storage.execute(args))
     except KeyboardInterrupt:
         print("\nExecution interrupted by user.", file=sys.stderr)
         sys.exit(130)
