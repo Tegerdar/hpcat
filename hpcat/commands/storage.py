@@ -11,13 +11,17 @@ from hpcat.formatters import json_out, csv_out, prometheus_out
 SSH_TIMEOUT = 5  # storage queries (beegfs-df, lfs df) can be slower than sysfs reads
 MAX_WORKERS = 30
 
-# Pseudo-filesystems to exclude from the generic df listing - none of these
-# represent real storage capacity worth reporting on.
+# Pseudo-filesystems to exclude entirely - never real storage capacity.
 DF_SKIP_FSTYPES = {
     "tmpfs", "devtmpfs", "proc", "sysfs", "cgroup", "cgroup2", "overlay",
     "squashfs", "devpts", "autofs", "mqueue", "debugfs", "tracefs",
     "securityfs", "pstore", "hugetlbfs", "nsfs", "rpc_pipefs", "fusectl",
 }
+
+# Mounts below this size are real (e.g. /boot/efi, efivarfs) but rarely what
+# anyone is checking capacity on. Hidden from the default table to keep it
+# scannable; always present in --extended and in JSON/CSV/Prometheus output.
+DEFAULT_TABLE_MIN_GB = 3.0
 
 # Remote-side collector. Root-free by design (matches the pattern used by
 # mem.py / cpu.py / network.py). Three record types, one line each:
@@ -49,7 +53,11 @@ if command -v beegfs-df >/dev/null 2>&1; then
 fi
 
 if command -v lfs >/dev/null 2>&1; then
-  lfs df -h 2>/dev/null | tail -n +2 | while IFS= read -r line; do
+  lfs df -h 2>/dev/null | while IFS= read -r line; do
+    trimmed=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    case "$trimmed" in
+      UUID*|"") continue ;;
+    esac
     echo "LUSTRE_ROW|${line}"
   done
 fi
@@ -83,6 +91,18 @@ _LUSTRE_ROW_RE = re.compile(
     r'(?:\[(?P<state>[^\]]*)\])?\s*$'
 )
 
+# lfs df -h prints one extra row at the end with no [MDT:N]/[OST:N] suffix and
+# no bracketed state - the aggregate across all targets for the filesystem:
+#   filesystem_summary:   <total>  <used>  <avail>  <use%>  <mount>
+_LUSTRE_SUMMARY_RE = re.compile(
+    r'^\s*filesystem_summary:\s+'
+    r'(?P<total>[\d.]+[KMGTP]?)\s+'
+    r'(?P<used>[\d.]+[KMGTP]?)\s+'
+    r'(?P<avail>[\d.]+[KMGTP]?)\s+'
+    r'(?P<use_pct>\d+)%\s+'
+    r'(?P<mount>\S+)\s*$'
+)
+
 
 def get_storage_nodes() -> List[str]:
     """Discover all compute nodes via Slurm."""
@@ -111,6 +131,15 @@ def _parse_beegfs_row(raw: str) -> Dict[str, Any]:
 
 
 def _parse_lustre_row(raw: str) -> Dict[str, Any]:
+    m = _LUSTRE_SUMMARY_RE.match(raw)
+    if m:
+        d = m.groupdict()
+        d["is_summary"] = True
+        try:
+            d["use_pct"] = int(d["use_pct"])
+        except (TypeError, ValueError):
+            pass
+        return d
     m = _LUSTRE_ROW_RE.match(raw)
     if m:
         d = m.groupdict()
@@ -167,7 +196,26 @@ def _parse_remote_output(stdout: str) -> Dict[str, Any]:
         elif record == "LUSTRE_ROW":
             lustre.append(_parse_lustre_row(rest))
 
-    return {"mounts": mounts, "beegfs": beegfs, "lustre": lustre}
+    # lfs df -h repeats its entire target listing once per active mountpoint
+    # when a node has the same Lustre filesystem mounted at multiple paths
+    # (e.g. /lustre-storage, /apps, /home all backed by one 'rtu' filesystem).
+    # Dedup on target name alone (not mount) - the same physical MDT/OST
+    # reported from different local mountpoints has identical capacity
+    # numbers, so only the target identity matters for uniqueness.
+    seen = set()
+    deduped_lustre = []
+    for row in lustre:
+        if "unparsed" in row:
+            deduped_lustre.append(row)  # never dedup unparsed - each is diagnostic signal
+            continue
+        key = row.get("target") if "target" in row else \
+            ("summary", row.get("total"), row.get("used"), row.get("avail"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_lustre.append(row)
+
+    return {"mounts": mounts, "beegfs": beegfs, "lustre": deduped_lustre}
 
 
 def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
@@ -235,6 +283,14 @@ def _blocks_to_gb(blocks_1k: str) -> float:
         return 0.0
 
 
+def _fmt_size(gb: float) -> str:
+    """Auto-scale to TB above 1024 GB so large parallel-fs mounts (Lustre,
+    BeeGFS) don't render as unreadable 6-digit GB numbers."""
+    if gb >= 1024:
+        return f"{gb / 1024:.1f}T"
+    return f"{gb:.1f}G"
+
+
 def _pcent_int(pcent: str) -> int:
     try:
         return int(pcent.rstrip('%'))
@@ -244,9 +300,10 @@ def _pcent_int(pcent: str) -> int:
 
 def print_console(data: Dict[str, Dict[str, Any]], extended: bool = False) -> None:
     """Formats the storage data into a clean terminal table."""
-    print("=" * 110)
-    print(f"{'Node':<12} | {'Mount':<28} | {'FSType':<12} | {'Size':<9} | {'Used':<9} | {'Avail':<9} | {'Use%'}")
-    print("=" * 110)
+    width = 88
+    print("=" * width)
+    print(f"{'Node':<12} | {'Mount':<24} | {'FSType':<10} | {'Size':>7} | {'Used':>7} | {'Avail':>7} | {'Use%'}")
+    print("=" * width)
 
     for node in sorted(data.keys()):
         node_data = data[node]
@@ -255,19 +312,32 @@ def print_console(data: Dict[str, Dict[str, Any]], extended: bool = False) -> No
             print(f"{node:<12} | [ ERROR: {node_data['error']} ]")
             continue
 
-        for m in node_data.get("mounts", []):
+        mounts = node_data.get("mounts", [])
+        shown_any = False
+
+        for m in mounts:
             size_gb = _blocks_to_gb(m["blocks_1k"])
             used_gb = _blocks_to_gb(m["used_1k"])
             avail_gb = _blocks_to_gb(m["avail_1k"])
             use_pct = _pcent_int(m["pcent"])
 
+            if not extended and size_gb < DEFAULT_TABLE_MIN_GB:
+                continue
+
+            shown_any = True
             marker = "  <-- LOW SPACE" if use_pct >= 90 else ""
             print(
-                f"{node:<12} | {m['mountpoint']:<28} | {m['fstype']:<12} | "
-                f"{size_gb:>7.1f}G | {used_gb:>7.1f}G | {avail_gb:>7.1f}G | {m['pcent']:>4}{marker}"
+                f"{node:<12} | {m['mountpoint']:<24} | {m['fstype']:<10} | "
+                f"{_fmt_size(size_gb):>7} | {_fmt_size(used_gb):>7} | {_fmt_size(avail_gb):>7} | "
+                f"{m['pcent']:>4}{marker}"
             )
 
-    print("=" * 110)
+        if not shown_any and mounts:
+            print(f"{node:<12} | [ only small/system mounts - use -e to show ]")
+
+    print("=" * width)
+    if not extended:
+        print(f"(mounts under {DEFAULT_TABLE_MIN_GB:.0f}G hidden - use -e to show all)")
 
     # BeeGFS / Lustre target-level detail - shown whenever present, since this
     # is the whole point of the module (capacity pool / target-level free%,
@@ -289,21 +359,22 @@ def print_console(data: Dict[str, Dict[str, Any]], extended: bool = False) -> No
             beegfs = node_data.get("beegfs", {})
             if not beegfs.get("meta") and not beegfs.get("storage"):
                 continue
-            print(f"\n--- {node} ---")
+            print(f"\n  {node}:")
             for kind, rows in (("Metadata", beegfs.get("meta", [])), ("Storage", beegfs.get("storage", []))):
                 if not rows:
                     continue
-                print(f"  {kind}:")
+                print(f"    {kind}")
                 for r in rows:
                     if "error" in r:
-                        print(f"    [ERROR] {r['error']}")
+                        print(f"      [ERROR] {r['error']}")
                     elif "unparsed" in r:
-                        print(f"    [unparsed] {r['unparsed']}")
+                        print(f"      [unparsed] {r['unparsed']}")
                     else:
                         marker = "  <-- LOW FREE%" if r["free_pct"] <= 10 else ""
                         print(
-                            f"    target={r['target_id']:<6} pool={r['pool']:<10} "
-                            f"total={r['total']:<10} free={r['free']:<10} free%={r['free_pct']:>3}%{marker}"
+                            f"      #{r['target_id']:<5} {r['pool']:<10} "
+                            f"{r['total']:>9} total  {r['free']:>9} free  "
+                            f"({r['free_pct']:>3}% free){marker}"
                         )
 
     if has_lustre:
@@ -315,17 +386,54 @@ def print_console(data: Dict[str, Dict[str, Any]], extended: bool = False) -> No
             rows = node_data.get("lustre", [])
             if not rows:
                 continue
-            print(f"\n--- {node} ---")
-            for r in rows:
-                if "unparsed" in r:
-                    print(f"    [unparsed] {r['unparsed']}")
-                else:
-                    use_pct = r.get("use_pct", -1)
-                    marker = "  <-- LOW SPACE" if isinstance(use_pct, int) and use_pct >= 90 else ""
+            print(f"\n  {node}:")
+            target_rows = [r for r in rows if not r.get("is_summary") and "unparsed" not in r]
+            unparsed_rows = [r for r in rows if "unparsed" in r]
+            summary_rows = [r for r in rows if r.get("is_summary")]
+
+            mdt_rows = [r for r in target_rows if "MDT" in r.get("target", "").upper()]
+            ost_rows = [r for r in target_rows if "OST" in r.get("target", "").upper()]
+            other_rows = [r for r in target_rows if r not in mdt_rows and r not in ost_rows]
+
+            def _print_target_row(r: Dict[str, Any]) -> None:
+                use_pct = r.get("use_pct", -1)
+                marker = "  <-- LOW SPACE" if isinstance(use_pct, int) and use_pct >= 90 else ""
+                print(
+                    f"      {r['target']:<26} {r['total']:>7} total  {r['used']:>7} used  "
+                    f"{r['avail']:>7} avail  ({r['use_pct']:>3}% used){marker}"
+                )
+
+            for r in mdt_rows:
+                _print_target_row(r)
+
+            if ost_rows:
+                use_pcts = [r["use_pct"] for r in ost_rows if isinstance(r.get("use_pct"), int)]
+                uniform = use_pcts and (max(use_pcts) - min(use_pcts) <= 2) and not extended
+                any_hot = any(p >= 90 for p in use_pcts) if use_pcts else False
+
+                if uniform and not any_hot:
+                    lo, hi = min(use_pcts), max(use_pcts)
+                    pct_str = f"{lo}%" if lo == hi else f"{lo}-{hi}%"
                     print(
-                        f"    target={r['target']:<28} total={r['total']:<8} "
-                        f"used={r['used']:<8} avail={r['avail']:<8} use%={r['use_pct']:>3}%{marker}"
+                        f"      {len(ost_rows)} OSTs (0..{len(ost_rows)-1}){'':<3} "
+                        f"~{ost_rows[0]['total']:>7} each   "
+                        f"use% range: {pct_str}   (uniform - use -e for per-target detail)"
                     )
+                else:
+                    for r in ost_rows:
+                        _print_target_row(r)
+
+            for r in other_rows:
+                _print_target_row(r)
+
+            for r in unparsed_rows:
+                print(f"      [unparsed] {r['unparsed']}")
+
+            for r in summary_rows:
+                print(
+                    f"      {'(filesystem total)':<26} {r['total']:>7} total  {r['used']:>7} used  "
+                    f"{r['avail']:>7} avail  ({r['use_pct']:>3}% used)"
+                )
 
     if extended:
         print("\n[ Extended: Raw Mount Details ]")
