@@ -1,18 +1,15 @@
 # hpcat/commands/network.py
 import json
 import os
-import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-# Import the decoupled formatters
-from hpcat.formatters import json_out, csv_out, prometheus_out
-
-SSH_TIMEOUT = 3
-MAX_WORKERS = 30
+from hpcat.core.cluster import poll_cluster
+from hpcat.core.discovery import resolve_nodes
+from hpcat.core.output import render_or_print
+from hpcat.core.ssh import ssh_poll
 
 # Counters pulled from `ethtool -S`. Kept to a deliberately small set: these are
 # the ones that actually indicate a problem (link errors, buffer drops, pause
@@ -152,20 +149,6 @@ done
 """
 
 
-def get_network_nodes() -> List[str]:
-    """Discover all compute nodes via Slurm."""
-    try:
-        result = subprocess.run(
-            ['sinfo', '-N', '-h', '-o', '%n'],
-            capture_output=True, text=True, check=True
-        )
-        nodes = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-        return list(set(nodes))
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print(f"Slurm discovery failed: {e}", file=sys.stderr)
-        return []
-
-
 def _parse_ethstats(raw: str) -> Dict[str, str]:
     """Parse 'key=val;key=val;' into a dict, skipping empty fragments."""
     out = {}
@@ -230,43 +213,22 @@ def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
     Root-free: everything is read from sysfs plus `ethtool -S` (which does not
     require elevated privileges, unlike `ethtool -s` / config changes).
     """
-    cmd = [
-        'ssh',
-        '-o', 'BatchMode=yes',
-        '-o', f'ConnectTimeout={SSH_TIMEOUT}',
-        '-o', 'StrictHostKeyChecking=no',
-        '-o', 'LogLevel=QUIET',
-        node,
-        REMOTE_SCRIPT,
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_TIMEOUT + 2)
-        if result.returncode != 0:
-            return node, {"error": "ssh_auth_or_network_query_failed"}
-        return node, _parse_remote_output(result.stdout)
-    except subprocess.TimeoutExpired:
-        return node, {"error": "timeout"}
-    except Exception as e:
-        return node, {"error": str(e)}
+    result, err = ssh_poll(node, REMOTE_SCRIPT, fail_label="ssh_auth_or_network_query_failed")
+    if err:
+        return node, err
+    return node, _parse_remote_output(result.stdout)
 
 
 def execute(args: Any) -> int:
     """Main execution router for the network subcommand."""
-    target_nodes = args.nodes if getattr(args, 'nodes', None) else get_network_nodes()
+    target_nodes = resolve_nodes(args)
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
     extended = getattr(args, 'extended', False)
     delta_mode = getattr(args, 'delta', False)
-    cluster_state = {}
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(poll_node, node): node for node in target_nodes}
-        for future in as_completed(futures):
-            node, node_data = future.result()
-            cluster_state[node] = node_data
+    cluster_state = poll_cluster(target_nodes, poll_node)
 
     elapsed_seconds = None
     if delta_mode:
@@ -281,16 +243,10 @@ def execute(args: Any) -> int:
             cluster_state, elapsed_seconds = _compute_deltas(cluster_state, previous)
         _save_snapshot(cluster_state)
 
-    # Route raw dictionary to the requested formatter
-    if getattr(args, 'prometheus', False):
-        print(prometheus_out.render(cluster_state, module="network"))
-    elif getattr(args, 'csv', False):
-        print(csv_out.render(cluster_state, module="network"))
-    elif getattr(args, 'json', False):
-        print(json_out.render(cluster_state, module="network"))
-    else:
-        print_console(cluster_state, extended, delta_mode, elapsed_seconds)
-
+    render_or_print(
+        args, cluster_state, "network", print_console,
+        extended, delta_mode, elapsed_seconds,
+    )
     return 0
 
 

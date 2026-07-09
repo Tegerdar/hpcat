@@ -1,15 +1,14 @@
 # hpcat/commands/storage.py
 import re
-import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple
 
-# Import the decoupled formatters
-from hpcat.formatters import json_out, csv_out, prometheus_out
+from hpcat.core.cluster import poll_cluster
+from hpcat.core.discovery import resolve_nodes
+from hpcat.core.output import render_or_print
+from hpcat.core.ssh import ssh_poll
 
 SSH_TIMEOUT = 5  # storage queries (beegfs-df, lfs df) can be slower than sysfs reads
-MAX_WORKERS = 30
 
 # Pseudo-filesystems to exclude entirely - never real storage capacity.
 DF_SKIP_FSTYPES = {
@@ -102,20 +101,6 @@ _LUSTRE_SUMMARY_RE = re.compile(
     r'(?P<use_pct>\d+)%\s+'
     r'(?P<mount>\S+)\s*$'
 )
-
-
-def get_storage_nodes() -> List[str]:
-    """Discover all compute nodes via Slurm."""
-    try:
-        result = subprocess.run(
-            ['sinfo', '-N', '-h', '-o', '%n'],
-            capture_output=True, text=True, check=True
-        )
-        nodes = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-        return list(set(nodes))
-    except (FileNotFoundError, subprocess.CalledProcessError) as e:
-        print(f"Slurm discovery failed: {e}", file=sys.stderr)
-        return []
 
 
 def _parse_beegfs_row(raw: str) -> Dict[str, Any]:
@@ -226,53 +211,25 @@ def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
     sections are simply empty rather than an error - this is expected on
     nodes that aren't BeeGFS/Lustre clients.
     """
-    cmd = [
-        'ssh',
-        '-o', 'BatchMode=yes',
-        '-o', f'ConnectTimeout={SSH_TIMEOUT}',
-        '-o', 'StrictHostKeyChecking=no',
-        '-o', 'LogLevel=QUIET',
-        node,
-        REMOTE_SCRIPT,
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=SSH_TIMEOUT + 3)
-        if result.returncode != 0:
-            return node, {"error": "ssh_auth_or_storage_query_failed"}
-        return node, _parse_remote_output(result.stdout)
-    except subprocess.TimeoutExpired:
-        return node, {"error": "timeout"}
-    except Exception as e:
-        return node, {"error": str(e)}
+    result, err = ssh_poll(
+        node, REMOTE_SCRIPT, timeout=SSH_TIMEOUT, extra_timeout=3,
+        fail_label="ssh_auth_or_storage_query_failed",
+    )
+    if err:
+        return node, err
+    return node, _parse_remote_output(result.stdout)
 
 
 def execute(args: Any) -> int:
     """Main execution router for the storage subcommand."""
-    target_nodes = args.nodes if getattr(args, 'nodes', None) else get_storage_nodes()
+    target_nodes = resolve_nodes(args)
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
     extended = getattr(args, 'extended', False)
-    cluster_state = {}
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(poll_node, node): node for node in target_nodes}
-        for future in as_completed(futures):
-            node, node_data = future.result()
-            cluster_state[node] = node_data
-
-    # Route raw dictionary to the requested formatter
-    if getattr(args, 'prometheus', False):
-        print(prometheus_out.render(cluster_state, module="storage"))
-    elif getattr(args, 'csv', False):
-        print(csv_out.render(cluster_state, module="storage"))
-    elif getattr(args, 'json', False):
-        print(json_out.render(cluster_state, module="storage"))
-    else:
-        print_console(cluster_state, extended)
-
+    cluster_state = poll_cluster(target_nodes, poll_node)
+    render_or_print(args, cluster_state, "storage", print_console, extended)
     return 0
 
 
