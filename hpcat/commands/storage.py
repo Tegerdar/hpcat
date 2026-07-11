@@ -23,10 +23,14 @@ DEFAULT_TABLE_MIN_GB = 3.0
 
 # Remote-side collector. Root-free by design (matches the pattern used by
 # mem.py / cpu.py / network.py). Three record types, one line each:
-#   MOUNT|<source>|<fstype>|<1k_blocks>|<used>|<avail>|<pcent>|<mountpoint>
+#   MOUNT|<raw whitespace-separated `df -PT` line: source fstype 1k_blocks used avail pcent mountpoint>
 #   BEEGFS_SECTION|<meta|storage>
 #   BEEGFS_ROW|<raw beegfs-df row text>
 #   LUSTRE_ROW|<raw lfs df -h row text>
+#
+# Only the record-type tag is pipe-delimited; each payload is passed through
+# verbatim and split on whitespace locally (see _parse_remote_output), since
+# that's the actual column separator these tools emit.
 #
 # beegfs-df and lfs df output is intentionally passed through as raw text
 # rather than pre-parsed remotely: their column layout varies across BeeGFS
