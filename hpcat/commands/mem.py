@@ -7,23 +7,22 @@ from hpcat.core.output import render_or_print
 from hpcat.core.slurm import query_node_state
 from hpcat.core.ssh import ssh_poll
 
-SLURM_KEYS = {'State', 'RealMemory', 'AllocMem', 'FreeMem'}
+SLURM_KEYS = {"State", "RealMemory", "AllocMem", "FreeMem"}
 
 
 def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
     """Fetch real-time Memory metrics via SSH and local Slurm query."""
-    # 1. SSH to get OS-level memory data via /proc/meminfo. We use
-    # /proc/meminfo instead of `free` to avoid parsing issues across distros.
-    result, err = ssh_poll(node, 'cat /proc/meminfo', fail_label="ssh_auth_or_meminfo_failed")
+    # /proc/meminfo instead of `free` avoids output-parsing differences across distros.
+    result, err = ssh_poll(node, "cat /proc/meminfo", fail_label="ssh_auth_or_meminfo_failed")
     if err:
         hw_data = err
     else:
         hw_data = {}
-        common_keys = {'MemTotal', 'MemFree', 'MemAvailable', 'Buffers', 'Cached', 'SwapTotal', 'SwapFree'}
-        for line in result.stdout.strip().split('\n'):
-            if ':' not in line:
+        common_keys = {"MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SwapTotal", "SwapFree"}
+        for line in result.stdout.strip().split("\n"):
+            if ":" not in line:
                 continue
-            key, value_str = line.split(':', 1)
+            key, value_str = line.split(":", 1)
             key = key.strip()
 
             if extended or key in common_keys:
@@ -36,7 +35,7 @@ def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
                     except ValueError:
                         hw_data[f"os_{key.lower()}"] = value_str.strip()
 
-    # 2. Query Slurm state for this node (runs locally on the execution node)
+    # Slurm's view of memory comes from the local scheduler, not another SSH round-trip.
     slurm_data = query_node_state(node, SLURM_KEYS)
 
     return node, {**hw_data, **slurm_data}
@@ -49,7 +48,7 @@ def execute(args: Any) -> int:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
-    extended = getattr(args, 'extended', False)
+    extended = getattr(args, "extended", False)
     cluster_state = poll_cluster(target_nodes, poll_node, extended)
     render_or_print(args, cluster_state, "memory", print_console, extended)
     return 0

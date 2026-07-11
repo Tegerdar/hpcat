@@ -19,18 +19,18 @@ def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
         return node, err
 
     gpus = []
-    for line in result.stdout.strip().split('\n'):
+    for line in result.stdout.strip().split("\n"):
         if not line:
             continue
-        parts = [p.strip() for p in line.split(',')]
+        parts = [p.strip() for p in line.split(",")]
         gpus.append({
             "index": int(parts[0]),
-            "model": parts[1].replace('"', ''),
-            "util_pct": float(parts[2]) if parts[2] != '[Not Supported]' else 0.0,
+            "model": parts[1].replace('"', ""),
+            "util_pct": float(parts[2]) if parts[2] != "[Not Supported]" else 0.0,
             "mem_used_mb": float(parts[3]),
             "mem_total_mb": float(parts[4]),
             "temp_c": float(parts[5]),
-            "power_w": float(parts[6]) if parts[6] != '[Not Supported]' else 0.0
+            "power_w": float(parts[6]) if parts[6] != "[Not Supported]" else 0.0,
         })
     return node, {"gpus": gpus}
 

@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from hpcat.commands import gpu, cpu, mem, network, storage
+from hpcat.commands import cpu, gpu, mem, network, storage
 
 
 def main() -> None:
@@ -15,97 +15,97 @@ GLOBAL FORMATTING OPTIONS:
     -c, --csv         Output in flattened CSV format
     -p, --prometheus  Output in Prometheus OpenMetrics format
 
-  Example: 
+  Example:
     hpcat gpu -j
     hpcat cpu -p
-        """
+        """,
     )
-    
+
     subparsers = parser.add_subparsers(
-        dest="command", 
-        required=True, 
-        help="Target subsystem to query"
+        dest="command",
+        required=True,
+        help="Target subsystem to query",
     )
 
     # --- Subcommand definitions ---
     parser_gpu = subparsers.add_parser(
-        "gpu", 
-        help="Real-time GPU hardware telemetry via SSH"
+        "gpu",
+        help="Real-time GPU hardware telemetry via SSH",
     )
     parser_gpu.add_argument(
         "-n", "--nodes",
         nargs="+",
         metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)"
+        help="List of nodes to target (overrides Slurm discovery)",
     )
 
     parser_cpu = subparsers.add_parser(
         "cpu",
-        help="CPU state"
+        help="CPU state",
     )
     parser_cpu.add_argument(
         "-n", "--nodes",
         nargs="+",
         metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)"
+        help="List of nodes to target (overrides Slurm discovery)",
     )
     parser_cpu.add_argument(
         "-e", "--extended",
         action="store_true",
-        help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)"
+        help="Include exhaustive CPU parameters (flags, vulnerabilities, NUMA mapping)",
     )
 
     parser_mem = subparsers.add_parser(
         "mem",
-        help="Memory usage and state"
+        help="Memory usage and state",
     )
     parser_mem.add_argument(
         "-n", "--nodes",
         nargs="+",
         metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)"
+        help="List of nodes to target (overrides Slurm discovery)",
     )
 
     parser_network = subparsers.add_parser(
         "network",
-        help="InfiniBand/RoCE link state and NIC error counters"
+        help="InfiniBand/RoCE link state and NIC error counters",
     )
     parser_network.add_argument(
         "-n", "--nodes",
         nargs="+",
         metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)"
+        help="List of nodes to target (overrides Slurm discovery)",
     )
     parser_network.add_argument(
         "-e", "--extended",
         action="store_true",
-        help="Include full per-netdev counters and interface details"
+        help="Include full per-netdev counters and interface details",
     )
     parser_network.add_argument(
         "-d", "--delta",
         action="store_true",
         help="Show counter change since the last 'network' run (snapshot-based; "
-             "first run establishes the baseline)"
+             "first run establishes the baseline)",
     )
 
     parser_storage = subparsers.add_parser(
         "storage",
-        help="Filesystem usage (df) plus BeeGFS/Lustre target-level detail"
+        help="Filesystem usage (df) plus BeeGFS/Lustre target-level detail",
     )
     parser_storage.add_argument(
         "-n", "--nodes",
         nargs="+",
         metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)"
+        help="List of nodes to target (overrides Slurm discovery)",
     )
     parser_storage.add_argument(
         "-e", "--extended",
         action="store_true",
-        help="Include full per-mount raw details"
+        help="Include full per-mount raw details",
     )
 
     # --- Standardized Output Formatting ---
-    for subp in [parser_gpu, parser_mem, parser_cpu, parser_network, parser_storage]:
+    for subp in (parser_gpu, parser_cpu, parser_mem, parser_network, parser_storage):
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")

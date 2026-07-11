@@ -8,31 +8,30 @@ from hpcat.core.output import render_or_print
 from hpcat.core.slurm import query_node_state
 from hpcat.core.ssh import ssh_poll
 
-SLURM_KEYS = {'State', 'CPUTot', 'CPULoad', 'AllocCPUs', 'IdleCPUs'}
+SLURM_KEYS = {"State", "CPUTot", "CPULoad", "AllocCPUs", "IdleCPUs"}
 
 
 def poll_node(node: str, extended: bool) -> Tuple[str, Dict[str, Any]]:
     """Fetch real-time CPU metrics via SSH and local Slurm query."""
-    # 1. SSH to get lscpu hardware data
-    result, err = ssh_poll(node, 'lscpu -J', fail_label="ssh_auth_or_lscpu_failed")
+    result, err = ssh_poll(node, "lscpu -J", fail_label="ssh_auth_or_lscpu_failed")
     if err:
         hw_data = err
     else:
         try:
             lscpu_data = json.loads(result.stdout)
             common_keys = {
-                'model_name', 'architecture', 'cpu(s)', 'thread(s)_per_core',
-                'core(s)_per_socket', 'socket(s)', 'numa_node(s)'
+                "model_name", "architecture", "cpu(s)", "thread(s)_per_core",
+                "core(s)_per_socket", "socket(s)", "numa_node(s)",
             }
             hw_data = {}
-            for item in lscpu_data.get('lscpu', []):
-                field = item.get('field', '').replace(':', '').strip().lower().replace(' ', '_').replace('-', '_')
+            for item in lscpu_data.get("lscpu", []):
+                field = item.get("field", "").replace(":", "").strip().lower().replace(" ", "_").replace("-", "_")
                 if extended or field in common_keys:
-                    hw_data[field] = item.get('data')
+                    hw_data[field] = item.get("data")
         except Exception as e:
             hw_data = {"error": str(e)}
 
-    # 2. Query Slurm state for this node (runs locally on the execution node)
+    # Slurm's view of CPU state comes from the local scheduler, not another SSH round-trip.
     slurm_data = query_node_state(node, SLURM_KEYS)
 
     return node, {**hw_data, **slurm_data}
@@ -45,7 +44,7 @@ def execute(args: Any) -> int:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
-    extended = getattr(args, 'extended', False)
+    extended = getattr(args, "extended", False)
     cluster_state = poll_cluster(target_nodes, poll_node, extended)
     render_or_print(args, cluster_state, "cpu", print_console, extended)
     return 0

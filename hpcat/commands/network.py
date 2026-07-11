@@ -1,4 +1,3 @@
-# hpcat/commands/network.py
 import json
 import os
 import sys
@@ -152,11 +151,11 @@ done
 def _parse_ethstats(raw: str) -> Dict[str, str]:
     """Parse 'key=val;key=val;' into a dict, skipping empty fragments."""
     out = {}
-    for chunk in raw.split(';'):
+    for chunk in raw.split(";"):
         chunk = chunk.strip()
-        if not chunk or '=' not in chunk:
+        if not chunk or "=" not in chunk:
             continue
-        k, v = chunk.split('=', 1)
+        k, v = chunk.split("=", 1)
         out[k] = v
     return out
 
@@ -171,10 +170,10 @@ def _parse_remote_output(stdout: str) -> Dict[str, Any]:
     ports = []
     netdevs: Dict[str, Dict[str, Any]] = {}
 
-    for line in stdout.strip().split('\n'):
-        if not line or '|' not in line:
+    for line in stdout.strip().split("\n"):
+        if not line or "|" not in line:
             continue
-        fields = line.split('|')
+        fields = line.split("|")
         record = fields[0]
 
         if record == "IBPORT" and len(fields) == 8:
@@ -226,8 +225,8 @@ def execute(args: Any) -> int:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
-    extended = getattr(args, 'extended', False)
-    delta_mode = getattr(args, 'delta', False)
+    extended = getattr(args, "extended", False)
+    delta_mode = getattr(args, "delta", False)
     cluster_state = poll_cluster(target_nodes, poll_node)
 
     elapsed_seconds = None

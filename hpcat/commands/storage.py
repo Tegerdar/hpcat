@@ -1,4 +1,3 @@
-# hpcat/commands/storage.py
 import re
 import sys
 from typing import Any, Dict, List, Tuple
@@ -67,39 +66,39 @@ fi
 # "Cap." column before Pool - the optional non-greedy token absorbs it when
 # present without requiring an exact column count.
 _BEEGFS_ROW_RE = re.compile(
-    r'^\s*(?P<target_id>\d+)\s+'
-    r'(?:\S+\s+)?'                            # optional Cap. column
-    r'(?P<pool>\[?\w+\]?)\s+'
-    r'(?P<total>[\d.]+\s*[KMGTP]i?B)\s+'
-    r'(?P<free>[\d.]+\s*[KMGTP]i?B)\s+'
-    r'(?P<free_pct>\d+)%\s+'
-    r'(?P<itotal>[\d.]+M)\s+'
-    r'(?P<ifree>[\d.]+M)\s+'
-    r'(?P<ifree_pct>\d+)%\s*$'
+    r"^\s*(?P<target_id>\d+)\s+"
+    r"(?:\S+\s+)?"                            # optional Cap. column
+    r"(?P<pool>\[?\w+\]?)\s+"
+    r"(?P<total>[\d.]+\s*[KMGTP]i?B)\s+"
+    r"(?P<free>[\d.]+\s*[KMGTP]i?B)\s+"
+    r"(?P<free_pct>\d+)%\s+"
+    r"(?P<itotal>[\d.]+M)\s+"
+    r"(?P<ifree>[\d.]+M)\s+"
+    r"(?P<ifree_pct>\d+)%\s*$"
 )
 
 # lfs df -h row format (both MDT and OST lines share this shape):
 #   fsname-MDTxxxx_UUID   <total>  <used>  <avail>  <use%>  <mount>[state]
 _LUSTRE_ROW_RE = re.compile(
-    r'^\s*(?P<target>\S+)\s+'
-    r'(?P<total>[\d.]+[KMGTP]?)\s+'
-    r'(?P<used>[\d.]+[KMGTP]?)\s+'
-    r'(?P<avail>[\d.]+[KMGTP]?)\s+'
-    r'(?P<use_pct>\d+)%\s+'
-    r'(?P<mount>\S+)'
-    r'(?:\[(?P<state>[^\]]*)\])?\s*$'
+    r"^\s*(?P<target>\S+)\s+"
+    r"(?P<total>[\d.]+[KMGTP]?)\s+"
+    r"(?P<used>[\d.]+[KMGTP]?)\s+"
+    r"(?P<avail>[\d.]+[KMGTP]?)\s+"
+    r"(?P<use_pct>\d+)%\s+"
+    r"(?P<mount>\S+)"
+    r"(?:\[(?P<state>[^\]]*)\])?\s*$"
 )
 
 # lfs df -h prints one extra row at the end with no [MDT:N]/[OST:N] suffix and
 # no bracketed state - the aggregate across all targets for the filesystem:
 #   filesystem_summary:   <total>  <used>  <avail>  <use%>  <mount>
 _LUSTRE_SUMMARY_RE = re.compile(
-    r'^\s*filesystem_summary:\s+'
-    r'(?P<total>[\d.]+[KMGTP]?)\s+'
-    r'(?P<used>[\d.]+[KMGTP]?)\s+'
-    r'(?P<avail>[\d.]+[KMGTP]?)\s+'
-    r'(?P<use_pct>\d+)%\s+'
-    r'(?P<mount>\S+)\s*$'
+    r"^\s*filesystem_summary:\s+"
+    r"(?P<total>[\d.]+[KMGTP]?)\s+"
+    r"(?P<used>[\d.]+[KMGTP]?)\s+"
+    r"(?P<avail>[\d.]+[KMGTP]?)\s+"
+    r"(?P<use_pct>\d+)%\s+"
+    r"(?P<mount>\S+)\s*$"
 )
 
 
@@ -149,10 +148,10 @@ def _parse_remote_output(stdout: str) -> Dict[str, Any]:
     lustre = []
     beegfs_section = None
 
-    for line in stdout.strip().split('\n'):
-        if not line or '|' not in line:
+    for line in stdout.strip().split("\n"):
+        if not line or "|" not in line:
             continue
-        record, _, rest = line.partition('|')
+        record, _, rest = line.partition("|")
 
         if record == "MOUNT":
             fields = rest.split(None, 6)
@@ -227,7 +226,7 @@ def execute(args: Any) -> int:
         print("No targets identified. Exiting.", file=sys.stderr)
         return 1
 
-    extended = getattr(args, 'extended', False)
+    extended = getattr(args, "extended", False)
     cluster_state = poll_cluster(target_nodes, poll_node)
     render_or_print(args, cluster_state, "storage", print_console, extended)
     return 0
@@ -250,7 +249,7 @@ def _fmt_size(gb: float) -> str:
 
 def _pcent_int(pcent: str) -> int:
     try:
-        return int(pcent.rstrip('%'))
+        return int(pcent.rstrip("%"))
     except (ValueError, AttributeError):
         return -1
 

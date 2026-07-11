@@ -1,16 +1,15 @@
-# hpcat/formatters/csv_out.py
-import io
 import csv
-from typing import Dict, Any
+import io
+from typing import Any, Dict
 
 
 def render(data: Dict[str, Any], module: str) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
 
-    if module == "gpus" or module == "gpu":
+    if module in ("gpus", "gpu"):
         writer.writerow([
-            "Node", "GPU_Index", "Model", "Util_Pct", 
+            "Node", "GPU_Index", "Model", "Util_Pct",
             "Mem_Used_MB", "Mem_Total_MB", "Temp_C", "Power_W", "Error"
         ])
         for node, node_data in sorted(data.items()):
@@ -25,7 +24,7 @@ def render(data: Dict[str, Any], module: str) -> str:
 
     elif module == "cpu":
         writer.writerow([
-            "Node", "Model", "Architecture", "CPUs", "Sockets", 
+            "Node", "Model", "Architecture", "CPUs", "Sockets",
             "Cores_Per_Socket", "Threads_Per_Core", "NUMA_Nodes",
             "Slurm_Total", "Slurm_Load", "Slurm_State", "Error"
         ])
@@ -130,7 +129,7 @@ def render(data: Dict[str, Any], module: str) -> str:
                     r["target"], r.get("use_pct", ""), ""
                 ])
 
-    elif module == "memory" or module == "mem":
+    elif module in ("memory", "mem"):
         writer.writerow([
             "Node", "OS_MemTotal_MB", "OS_MemAvailable_MB", "OS_MemFree_MB", "Buffers_MB", "Cached_MB",
             "SwapTotal_MB", "SwapFree_MB", "Slurm_RealMemory_MB", "Slurm_AllocMem_MB", "Slurm_FreeMem_MB", "Error"

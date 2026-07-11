@@ -1,6 +1,12 @@
-# hpcat/formatters/prometheus_out.py
-import socket
-from typing import Dict, Any, List, Tuple
+from typing import Any, Dict, List, Tuple
+
+
+def _to_float(val: Any, default: float = 0.0) -> float:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
 
 def render(data: Dict[str, Any], module: str) -> str:
     """Translates raw dictionary data into Prometheus exposition format."""
@@ -14,8 +20,8 @@ def render(data: Dict[str, Any], module: str) -> str:
         for labels, value in points:
             lines.append(f"{name}{{{labels}}} {value}")
 
-    # GPU section (unchanged logic, per-node metrics)
-    if module == "gpus" or module == "gpu":
+    # GPU section: per-GPU metrics, one label set per (node, gpu_index)
+    if module in ("gpus", "gpu"):
         util, mem_used, mem_tot, temp, pwr = [], [], [], [], []
 
         for node, node_data in data.items():
@@ -42,24 +48,18 @@ def render(data: Dict[str, Any], module: str) -> str:
         slurm_total: List[Tuple[str, float]] = []
         slurm_load: List[Tuple[str, float]] = []
 
-        def to_float(val: Any, default: float = 0.0) -> float:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return default
-
         for node, node_data in data.items():
             if "error" in node_data:
                 continue
-            model = str(node_data.get("model_name", "unknown")).replace('"', '')
+            model = str(node_data.get("model_name", "unknown")).replace('"', "")
             lbl = f'node="{node}",model="{model}"'
-            cores.append((lbl, to_float(node_data.get("cpu(s)"))))
-            sockets.append((lbl, to_float(node_data.get("socket(s)"))))
+            cores.append((lbl, _to_float(node_data.get("cpu(s)"))))
+            sockets.append((lbl, _to_float(node_data.get("socket(s)"))))
 
             if "slurm_cputot" in node_data:
-                slurm_total.append((lbl, to_float(node_data.get("slurm_cputot"))))
+                slurm_total.append((lbl, _to_float(node_data.get("slurm_cputot"))))
             if "slurm_cpuload" in node_data:
-                slurm_load.append((lbl, to_float(node_data.get("slurm_cpuload"))))
+                slurm_load.append((lbl, _to_float(node_data.get("slurm_cpuload"))))
 
         add_metric("hpcat_cpu_cores_total", "Total OS CPU Cores", "gauge", cores)
         add_metric("hpcat_cpu_sockets_total", "Total CPU Sockets", "gauge", sockets)
@@ -77,12 +77,6 @@ def render(data: Dict[str, Any], module: str) -> str:
         link_down_events: List[Tuple[str, float]] = []
         pause_active: List[Tuple[str, float]] = []
 
-        def to_float(val: Any, default: float = 0.0) -> float:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return default
-
         for node, node_data in data.items():
             if "error" in node_data:
                 continue
@@ -95,13 +89,13 @@ def render(data: Dict[str, Any], module: str) -> str:
                 stats = netdevs.get(nd, {}).get("stats", {}) if nd != "-" else {}
                 if not stats:
                     continue
-                out_of_buffer.append((lbl, to_float(stats.get("rx_out_of_buffer"))))
-                crc_errors.append((lbl, to_float(stats.get("rx_crc_errors_phy"))))
-                symbol_errors.append((lbl, to_float(stats.get("rx_symbol_err_phy"))))
-                rx_discards.append((lbl, to_float(stats.get("rx_discards_phy"))))
-                tx_discards.append((lbl, to_float(stats.get("tx_discards_phy"))))
-                link_down_events.append((lbl, to_float(stats.get("link_down_events_phy"))))
-                pause_on = to_float(stats.get("rx_pause_ctrl_phy")) > 0 or to_float(stats.get("tx_pause_ctrl_phy")) > 0
+                out_of_buffer.append((lbl, _to_float(stats.get("rx_out_of_buffer"))))
+                crc_errors.append((lbl, _to_float(stats.get("rx_crc_errors_phy"))))
+                symbol_errors.append((lbl, _to_float(stats.get("rx_symbol_err_phy"))))
+                rx_discards.append((lbl, _to_float(stats.get("rx_discards_phy"))))
+                tx_discards.append((lbl, _to_float(stats.get("tx_discards_phy"))))
+                link_down_events.append((lbl, _to_float(stats.get("link_down_events_phy"))))
+                pause_on = _to_float(stats.get("rx_pause_ctrl_phy")) > 0 or _to_float(stats.get("tx_pause_ctrl_phy")) > 0
                 pause_active.append((lbl, 1.0 if pause_on else 0.0))
 
         add_metric("hpcat_ib_port_link_up", "1 if port state is ACTIVE, else 0", "gauge", link_up)
@@ -120,20 +114,14 @@ def render(data: Dict[str, Any], module: str) -> str:
         beegfs_free_pct: List[Tuple[str, float]] = []
         lustre_use_pct: List[Tuple[str, float]] = []
 
-        def to_float(val: Any, default: float = 0.0) -> float:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return default
-
         for node, node_data in data.items():
             if "error" in node_data:
                 continue
 
             for m in node_data.get("mounts", []):
                 lbl = f'node="{node}",mountpoint="{m["mountpoint"]}",fstype="{m["fstype"]}"'
-                pcent = str(m.get("pcent", "")).rstrip('%')
-                mount_use_pct.append((lbl, to_float(pcent, -1.0)))
+                pcent = str(m.get("pcent", "")).rstrip("%")
+                mount_use_pct.append((lbl, _to_float(pcent, -1.0)))
                 try:
                     avail_bytes = int(m["avail_1k"]) * 1024.0
                     mount_avail_bytes.append((lbl, avail_bytes))
@@ -146,13 +134,13 @@ def render(data: Dict[str, Any], module: str) -> str:
                     if "target_id" not in r:
                         continue
                     lbl = f'node="{node}",target_id="{r["target_id"]}",kind="{kind}",pool="{r["pool"]}"'
-                    beegfs_free_pct.append((lbl, to_float(r.get("free_pct"))))
+                    beegfs_free_pct.append((lbl, _to_float(r.get("free_pct"))))
 
             for r in node_data.get("lustre", []):
                 if "target" not in r:
                     continue
                 lbl = f'node="{node}",target="{r["target"]}"'
-                lustre_use_pct.append((lbl, to_float(r.get("use_pct"))))
+                lustre_use_pct.append((lbl, _to_float(r.get("use_pct"))))
 
         add_metric("hpcat_storage_mount_use_percent", "Filesystem use percentage (df)", "gauge", mount_use_pct)
         add_metric("hpcat_storage_mount_available_bytes", "Filesystem available space (bytes)", "gauge", mount_avail_bytes)
@@ -173,10 +161,7 @@ def render(data: Dict[str, Any], module: str) -> str:
         slurm_free: List[Tuple[str, float]] = []
 
         def mb_to_bytes(v: Any) -> float:
-            try:
-                return float(v) * 1024.0 * 1024.0
-            except (TypeError, ValueError):
-                return 0.0
+            return _to_float(v) * 1024.0 * 1024.0
 
         for node, node_data in data.items():
             if "error" in node_data:
