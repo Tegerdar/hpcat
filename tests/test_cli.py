@@ -20,12 +20,12 @@ class NodesFlagParsingTests(unittest.TestCase):
         self.assertEqual(args.nodes, [])
 
     def test_flag_with_one_name(self):
-        args = self.parser.parse_args(["gpu", "-n", "aibox"])
-        self.assertEqual(args.nodes, ["aibox"])
+        args = self.parser.parse_args(["gpu", "-n", "node01"])
+        self.assertEqual(args.nodes, ["node01"])
 
     def test_flag_with_multiple_names(self):
-        args = self.parser.parse_args(["gpu", "-n", "aibox", "ainode01"])
-        self.assertEqual(args.nodes, ["aibox", "ainode01"])
+        args = self.parser.parse_args(["gpu", "-n", "node01", "node02"])
+        self.assertEqual(args.nodes, ["node01", "node02"])
 
     def test_bare_flag_followed_by_other_flags_stays_empty(self):
         # nargs='*' must stop consuming as soon as it hits another option

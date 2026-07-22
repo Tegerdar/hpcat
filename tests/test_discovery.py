@@ -23,26 +23,26 @@ class ResolveNodesTests(unittest.TestCase):
         self.assertEqual(result, ["nodeA", "nodeB"])
 
     def test_bare_flag_targets_only_the_local_host(self):
-        with mock.patch("socket.gethostname", return_value="aibox"), \
+        with mock.patch("socket.gethostname", return_value="node01"), \
              mock.patch("hpcat.core.discovery.discover_nodes") as disc:
             result = resolve_nodes(_args([]))
         disc.assert_not_called()
-        self.assertEqual(result, ["aibox"])
+        self.assertEqual(result, ["node01"])
 
     def test_bare_flag_uses_short_hostname_not_fqdn(self):
-        with mock.patch("socket.gethostname", return_value="aibox.hpc.rtu.lv"):
+        with mock.patch("socket.gethostname", return_value="node01.cluster.example"):
             result = resolve_nodes(_args([]))
-        self.assertEqual(result, ["aibox"])
+        self.assertEqual(result, ["node01"])
 
     def test_bare_flag_ignores_gres_filter(self):
         # Matches the pre-existing explicit-list behavior: if you named the
         # node (even implicitly, by "just this one"), the GPU filter that
         # exists purely to narrow discovery results doesn't apply.
-        with mock.patch("socket.gethostname", return_value="aibox"), \
+        with mock.patch("socket.gethostname", return_value="node01"), \
              mock.patch("hpcat.core.discovery.discover_nodes") as disc:
             result = resolve_nodes(_args([]), gres_filter="gpu")
         disc.assert_not_called()
-        self.assertEqual(result, ["aibox"])
+        self.assertEqual(result, ["node01"])
 
     def test_missing_nodes_attribute_falls_back_to_discovery(self):
         # jobs.py's argparser has no -n at all; getattr's default covers it.

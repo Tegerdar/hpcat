@@ -242,12 +242,12 @@ If Slurm discovery fails or required utilities are missing, hpcat will print an 
 
 If a target node is the same host hpcat is running on, hpcat skips SSH entirely and runs the query directly. This matters for service accounts that either have no SSH key set up, or whose login shell is intentionally something like `/sbin/nologin` (common for accounts such as `zabbix`, which should not otherwise be able to SSH anywhere) - such an account can still monitor the local machine it's already running on without any SSH access at all. SSH is still used for every genuinely remote node.
 
-This is what the bare `-n` form (see [Targeting nodes](#targeting-nodes--n) above) is for in practice - `hpcat gpu -n -t -p` never resolves to anything but the local host, so it never needs SSH. Explicitly naming the local host (`hpcat gpu -n aibox`) gets the same result, since node identity for the SSH short-circuit is a separate check: the account's own hostname (`gethostname()`/`getfqdn()`, short and FQDN forms, case-insensitive) matched against whatever node name was targeted, however it was chosen.
+This is what the bare `-n` form (see [Targeting nodes](#targeting-nodes--n) above) is for in practice - `hpcat gpu -n -t -p` never resolves to anything but the local host, so it never needs SSH. Explicitly naming the local host (`hpcat gpu -n node01`) gets the same result, since node identity for the SSH short-circuit is a separate check: the account's own hostname (`gethostname()`/`getfqdn()`, short and FQDN forms, case-insensitive) matched against whatever node name was targeted, however it was chosen.
 
 If you need to force SSH even for the local host - e.g. to test SSH trust independently of this shortcut - set `HPCAT_FORCE_SSH=1`:
 
 ```bash
-HPCAT_FORCE_SSH=1 hpcat gpu -n aibox
+HPCAT_FORCE_SSH=1 hpcat gpu -n node01
 ```
 
 ## Delta snapshots (net -d)

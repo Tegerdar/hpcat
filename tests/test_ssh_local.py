@@ -8,8 +8,8 @@ from hpcat.core import ssh
 class IsLocalNodeTests(unittest.TestCase):
     def setUp(self):
         ssh._local_names.cache_clear()
-        patcher_hn = mock.patch("socket.gethostname", return_value="aibox")
-        patcher_fqdn = mock.patch("socket.getfqdn", return_value="aibox.hpc.rtu.lv")
+        patcher_hn = mock.patch("socket.gethostname", return_value="node01")
+        patcher_fqdn = mock.patch("socket.getfqdn", return_value="node01.cluster.example")
         self.addCleanup(patcher_hn.stop)
         self.addCleanup(patcher_fqdn.stop)
         patcher_hn.start()
@@ -17,29 +17,29 @@ class IsLocalNodeTests(unittest.TestCase):
         self.addCleanup(ssh._local_names.cache_clear)
 
     def test_short_hostname_matches(self):
-        self.assertTrue(ssh.is_local_node("aibox"))
+        self.assertTrue(ssh.is_local_node("node01"))
 
     def test_fqdn_matches(self):
-        self.assertTrue(ssh.is_local_node("aibox.hpc.rtu.lv"))
+        self.assertTrue(ssh.is_local_node("node01.cluster.example"))
 
     def test_case_insensitive(self):
-        self.assertTrue(ssh.is_local_node("AIBOX"))
+        self.assertTrue(ssh.is_local_node("NODE01"))
 
     def test_surrounding_whitespace_from_slurm_output_is_tolerated(self):
-        self.assertTrue(ssh.is_local_node("  aibox  "))
+        self.assertTrue(ssh.is_local_node("  node01  "))
 
     def test_different_node_is_not_local(self):
-        self.assertFalse(ssh.is_local_node("ainode01"))
+        self.assertFalse(ssh.is_local_node("node02"))
 
     def test_hpcat_force_ssh_overrides_a_real_match(self):
         with mock.patch.dict("os.environ", {"HPCAT_FORCE_SSH": "1"}):
-            self.assertFalse(ssh.is_local_node("aibox"))
+            self.assertFalse(ssh.is_local_node("node01"))
 
     def test_gethostname_and_getfqdn_disagreeing_both_still_match(self):
         # DHCP/hosts-file mismatches are common enough that both spellings
         # need to resolve as local, not just whichever call happens to run.
-        self.assertTrue(ssh.is_local_node("aibox"))
-        self.assertTrue(ssh.is_local_node("aibox.hpc.rtu.lv"))
+        self.assertTrue(ssh.is_local_node("node01"))
+        self.assertTrue(ssh.is_local_node("node01.cluster.example"))
 
 
 class SshPollDispatchTests(unittest.TestCase):
@@ -54,7 +54,7 @@ class SshPollDispatchTests(unittest.TestCase):
              mock.patch.object(ssh, "ssh_run") as mock_ssh:
             mock_local.return_value = subprocess.CompletedProcess(
                 args="x", returncode=0, stdout="ok", stderr="")
-            result, err = ssh.ssh_poll("aibox", "echo hi")
+            result, err = ssh.ssh_poll("node01", "echo hi")
         mock_local.assert_called_once()
         mock_ssh.assert_not_called()
         self.assertIsNone(err)
@@ -66,7 +66,7 @@ class SshPollDispatchTests(unittest.TestCase):
              mock.patch.object(ssh, "local_run") as mock_local:
             mock_ssh.return_value = subprocess.CompletedProcess(
                 args="x", returncode=0, stdout="ok", stderr="")
-            ssh.ssh_poll("ainode01", "echo hi")
+            ssh.ssh_poll("node02", "echo hi")
         mock_ssh.assert_called_once()
         mock_local.assert_not_called()
 
@@ -75,7 +75,7 @@ class SshPollDispatchTests(unittest.TestCase):
              mock.patch.object(ssh, "local_run") as mock_local:
             mock_local.return_value = subprocess.CompletedProcess(
                 args="x", returncode=1, stdout="", stderr="boom")
-            result, err = ssh.ssh_poll("aibox", "false", fail_label="custom_fail")
+            result, err = ssh.ssh_poll("node01", "false", fail_label="custom_fail")
         self.assertIsNone(result)
         self.assertEqual(err, {"error": "custom_fail"})
 
@@ -83,7 +83,7 @@ class SshPollDispatchTests(unittest.TestCase):
         with mock.patch.object(ssh, "is_local_node", return_value=True), \
              mock.patch.object(ssh, "local_run",
                                side_effect=subprocess.TimeoutExpired("x", 3)):
-            result, err = ssh.ssh_poll("aibox", "sleep 999")
+            result, err = ssh.ssh_poll("node01", "sleep 999")
         self.assertIsNone(result)
         self.assertEqual(err, {"error": "timeout"})
 
