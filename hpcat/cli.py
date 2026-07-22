@@ -1,7 +1,18 @@
 import argparse
 import sys
 
-from hpcat.commands import cpu, gpu, mem, network, storage
+from hpcat.commands import cpu, gpu, jobs, mem, net, stg
+
+HANDLERS = {
+    "gpu": gpu,
+    "cpu": cpu,
+    "mem": mem,
+    "net": net,
+    "stg": stg,
+    "jobs": jobs,
+}
+
+NODES_HELP = "List of nodes to target (overrides Slurm discovery)"
 
 
 def main() -> None:
@@ -9,15 +20,19 @@ def main() -> None:
         description="hpcat: Modern HPC Cluster Administration & Telemetry",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
-GLOBAL FORMATTING OPTIONS:
-  These flags can be appended to any subcommand to change the output format:
+GLOBAL OPTIONS:
+  These flags can be appended to any subcommand:
+    -t, --total       Collapse the detail rows: one aggregate row per node,
+                      plus a single cluster-wide row. Applies to every output
+                      format, so -t -p exports aggregate metrics only.
     -j, --json        Output in machine-readable JSON
     -c, --csv         Output in flattened CSV format
     -p, --prometheus  Output in Prometheus OpenMetrics format
 
   Example:
-    hpcat gpu -j
-    hpcat cpu -p
+    hpcat gpu -t
+    hpcat stg -t -p
+    hpcat jobs
         """,
     )
 
@@ -32,23 +47,13 @@ GLOBAL FORMATTING OPTIONS:
         "gpu",
         help="Real-time GPU hardware telemetry via SSH",
     )
-    parser_gpu.add_argument(
-        "-n", "--nodes",
-        nargs="+",
-        metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)",
-    )
+    parser_gpu.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
 
     parser_cpu = subparsers.add_parser(
         "cpu",
         help="CPU state",
     )
-    parser_cpu.add_argument(
-        "-n", "--nodes",
-        nargs="+",
-        metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)",
-    )
+    parser_cpu.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
     parser_cpu.add_argument(
         "-e", "--extended",
         action="store_true",
@@ -59,53 +64,59 @@ GLOBAL FORMATTING OPTIONS:
         "mem",
         help="Memory usage and state",
     )
+    parser_mem.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
     parser_mem.add_argument(
-        "-n", "--nodes",
-        nargs="+",
-        metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)",
+        "-e", "--extended",
+        action="store_true",
+        help="Include every /proc/meminfo field, not just the common ones",
     )
 
-    parser_network = subparsers.add_parser(
-        "network",
+    parser_net = subparsers.add_parser(
+        "net",
         help="InfiniBand/RoCE link state and NIC error counters",
     )
-    parser_network.add_argument(
-        "-n", "--nodes",
-        nargs="+",
-        metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)",
-    )
-    parser_network.add_argument(
+    parser_net.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_net.add_argument(
         "-e", "--extended",
         action="store_true",
         help="Include full per-netdev counters and interface details",
     )
-    parser_network.add_argument(
+    parser_net.add_argument(
         "-d", "--delta",
         action="store_true",
-        help="Show counter change since the last 'network' run (snapshot-based; "
+        help="Show counter change since the last 'net' run (snapshot-based; "
              "first run establishes the baseline)",
     )
 
-    parser_storage = subparsers.add_parser(
-        "storage",
+    parser_stg = subparsers.add_parser(
+        "stg",
         help="Filesystem usage (df) plus BeeGFS/Lustre target-level detail",
     )
-    parser_storage.add_argument(
-        "-n", "--nodes",
-        nargs="+",
-        metavar="NODE",
-        help="List of nodes to target (overrides Slurm discovery)",
-    )
-    parser_storage.add_argument(
+    parser_stg.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_stg.add_argument(
         "-e", "--extended",
         action="store_true",
         help="Include full per-mount raw details",
     )
 
-    # --- Standardized Output Formatting ---
-    for subp in (parser_gpu, parser_cpu, parser_mem, parser_network, parser_storage):
+    parser_jobs = subparsers.add_parser(
+        "jobs",
+        help="Scheduler queue depth: running and pending (idle) job counts",
+    )
+    parser_jobs.add_argument(
+        "--expand-arrays",
+        action="store_true",
+        help="Count individual array tasks instead of one record per job array",
+    )
+
+    # --- Standardized global options ---
+    all_parsers = (parser_gpu, parser_cpu, parser_mem, parser_net, parser_stg, parser_jobs)
+    for subp in all_parsers:
+        subp.add_argument(
+            "-t", "--total",
+            action="store_true",
+            help="Aggregate view: one row per node plus a cluster total row",
+        )
         format_group = subp.add_mutually_exclusive_group()
         format_group.add_argument("-j", "--json", action="store_true", help="Output in machine-readable JSON")
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
@@ -114,16 +125,7 @@ GLOBAL FORMATTING OPTIONS:
     args = parser.parse_args()
 
     try:
-        if args.command == "gpu":
-            sys.exit(gpu.execute(args))
-        elif args.command == "cpu":
-            sys.exit(cpu.execute(args))
-        elif args.command == "mem":
-            sys.exit(mem.execute(args))
-        elif args.command == "network":
-            sys.exit(network.execute(args))
-        elif args.command == "storage":
-            sys.exit(storage.execute(args))
+        sys.exit(HANDLERS[args.command].execute(args))
     except KeyboardInterrupt:
         print("\nExecution interrupted by user.", file=sys.stderr)
         sys.exit(130)

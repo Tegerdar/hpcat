@@ -2,6 +2,8 @@ import csv
 import io
 from typing import Any, Dict
 
+from hpcat.formatters.summary_out import COLUMNS
+
 
 def render(data: Dict[str, Any], module: str) -> str:
     output = io.StringIO()
@@ -49,7 +51,7 @@ def render(data: Dict[str, Any], module: str) -> str:
                 ""
             ])
 
-    elif module == "network":
+    elif module in ("net", "network"):
         writer.writerow([
             "Node", "Device", "Netdev", "Link_State", "Phys_State", "Link_Layer", "Rate",
             "RX_Out_Of_Buffer", "RX_CRC_Errors_Phy", "RX_Symbol_Err_Phy",
@@ -85,7 +87,7 @@ def render(data: Dict[str, Any], module: str) -> str:
                     ""
                 ])
 
-    elif module == "storage":
+    elif module in ("stg", "storage"):
         writer.writerow([
             "Node", "Mountpoint", "FSType", "Size_GB", "Used_GB", "Avail_GB", "Use_Pct",
             "BeeGFS_Target", "BeeGFS_Kind", "BeeGFS_Pool", "BeeGFS_FreePct",
@@ -154,5 +156,40 @@ def render(data: Dict[str, Any], module: str) -> str:
                 node_data.get("slurm_freemem", ""),
                 ""
             ])
+
+    elif module == "jobs":
+        writer.writerow(["State", "Jobs"])
+        for state, count in sorted(data.get("states", {}).items()):
+            writer.writerow([state, count])
+        writer.writerow(["RUNNING_TOTAL", data.get("running", 0)])
+        writer.writerow(["PENDING_TOTAL", data.get("pending", 0)])
+        writer.writerow(["OTHER_TOTAL", data.get("other", 0)])
+        writer.writerow(["ALL_TOTAL", data.get("total", 0)])
+
+    return output.getvalue().strip()
+
+
+def render_summary(summary: Dict[str, Any], module: str) -> str:
+    """CSV for `-t`: one row per node, then a CLUSTER row.
+
+    Column order is taken from summary_out.COLUMNS so the CSV and the console
+    table can never drift apart.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    keys = [col[0] for col in COLUMNS[module]]
+    writer.writerow(["Scope", "Node"] + [col[1] for col in COLUMNS[module]] + ["Error"])
+
+    nodes = summary.get("nodes", {})
+    for node in sorted(nodes):
+        vals = nodes[node]
+        writer.writerow(["node", node] + [vals.get(k, "") for k in keys] + [""])
+
+    for node, reason in sorted(summary.get("meta", {}).get("errors", {}).items()):
+        writer.writerow(["node", node] + [""] * len(keys) + [reason])
+
+    cluster = summary.get("cluster", {})
+    writer.writerow(["cluster", ""] + [cluster.get(k, "") for k in keys] + [""])
 
     return output.getvalue().strip()

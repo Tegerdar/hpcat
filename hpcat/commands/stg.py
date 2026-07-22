@@ -22,7 +22,7 @@ DF_SKIP_FSTYPES = {
 DEFAULT_TABLE_MIN_GB = 3.0
 
 # Remote-side collector. Root-free by design (matches the pattern used by
-# mem.py / cpu.py / network.py). Three record types, one line each:
+# mem.py / cpu.py / net.py). Three record types, one line each:
 #   MOUNT|<raw whitespace-separated `df -PT` line: source fstype 1k_blocks used avail pcent mountpoint>
 #   BEEGFS_SECTION|<meta|storage>
 #   BEEGFS_ROW|<raw beegfs-df row text>
@@ -224,7 +224,7 @@ def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
 
 
 def execute(args: Any) -> int:
-    """Main execution router for the storage subcommand."""
+    """Main execution router for the stg subcommand."""
     target_nodes = resolve_nodes(args)
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
@@ -232,7 +232,7 @@ def execute(args: Any) -> int:
 
     extended = getattr(args, "extended", False)
     cluster_state = poll_cluster(target_nodes, poll_node)
-    render_or_print(args, cluster_state, "storage", print_console, extended)
+    render_or_print(args, cluster_state, "stg", print_console, extended)
     return 0
 
 

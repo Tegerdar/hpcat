@@ -34,7 +34,7 @@ def _snapshot_path() -> Path:
     """Where the last-run snapshot lives. Respects XDG_CACHE_HOME if set,
     otherwise falls back to ~/.cache/hpcat/ - no root required either way."""
     base = os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
-    return Path(base) / "hpcat" / "network_snapshot.json"
+    return Path(base) / "hpcat" / "net_snapshot.json"
 
 
 def _load_snapshot() -> Optional[Dict[str, Any]]:
@@ -219,7 +219,7 @@ def poll_node(node: str) -> Tuple[str, Dict[str, Any]]:
 
 
 def execute(args: Any) -> int:
-    """Main execution router for the network subcommand."""
+    """Main execution router for the net subcommand."""
     target_nodes = resolve_nodes(args)
     if not target_nodes:
         print("No targets identified. Exiting.", file=sys.stderr)
@@ -243,7 +243,7 @@ def execute(args: Any) -> int:
         _save_snapshot(cluster_state)
 
     render_or_print(
-        args, cluster_state, "network", print_console,
+        args, cluster_state, "net", print_console,
         extended, delta_mode, elapsed_seconds,
     )
     return 0
