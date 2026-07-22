@@ -1,3 +1,4 @@
+import socket
 import subprocess
 import sys
 from typing import List, Optional
@@ -35,7 +36,23 @@ def discover_nodes(gres_filter: Optional[str] = None) -> List[str]:
 
 
 def resolve_nodes(args, gres_filter: Optional[str] = None) -> List[str]:
-    """`-n/--nodes` on the CLI always wins over discovery; this is the
-    override-vs-discover decision every command's execute() repeated."""
+    """`-n/--nodes` has three states, distinguished by argparse's nargs='*':
+
+      - flag absent            -> args.nodes is None   -> run Slurm discovery
+      - `-n node1 node2 ...`   -> args.nodes is a list  -> use it verbatim
+      - `-n` with no names     -> args.nodes is []      -> target only the
+                                   host hpcat is running on, no SSH involved
+
+    The bare-flag case exists for service accounts that can reach this host
+    directly (see core/ssh.py's local short-circuit) but have no SSH access
+    to anything else - `hpcat gpu -n -t -p` never touches the network.
+
+    Like an explicit node list, the bare case bypasses gres_filter: if
+    you're running it on this host, you already know what's on it.
+    """
     explicit = getattr(args, "nodes", None)
-    return explicit if explicit else discover_nodes(gres_filter)
+    if explicit is None:
+        return discover_nodes(gres_filter)
+    if len(explicit) == 0:
+        return [socket.gethostname().split(".", 1)[0]]
+    return explicit

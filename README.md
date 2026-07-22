@@ -31,11 +31,38 @@ General form:
 hpcat <subcommand> [OPTIONS]
 ```
 
-Global options are available for all subcommands:
+Global options are available for all subcommands (except `jobs`, which is cluster-wide and has no node dimension - see below):
+- `-n [NODE ...]`       Which nodes to target - see below, this flag has three distinct states
 - `-t`, `--total`       Aggregate view: one row per node plus a cluster total row
 - `-j`, `--json`        Output in machine-readable JSON
 - `-c`, `--csv`         Output in flattened CSV format
 - `-p`, `--prometheus`  Output in Prometheus OpenMetrics format
+
+### Targeting nodes (`-n`)
+
+`-n` has three states, not two:
+
+| Form | Effect |
+|---|---|
+| flag omitted | Discover nodes via `sinfo` (the default) |
+| `-n node01 node02` | Target exactly those nodes, skipping discovery |
+| `-n` with no names | Target only the host `hpcat` is running on - no SSH, no discovery |
+
+The bare form exists for accounts that can reach the local host directly but
+have no SSH access anywhere else - see [Running on a monitored node itself](#running-on-a-monitored-node-itself-no-ssh)
+below. For example, a service account with a `/sbin/nologin` shell can do:
+```bash
+hpcat gpu -n -t -p
+```
+and get real data back for the local node with zero SSH involved, even
+though that same account couldn't run `hpcat gpu` (full cluster) at all.
+
+**Keep `-n` separated from other short flags** - `-n -t -p`, not `-ntp`.
+Because `-n` can take a variable number of following names, argparse reads
+`-ntp` as `-n` given the single node name `tp`, silently dropping `-t` and
+`-p` rather than applying them. This isn't an hpcat quirk to be "fixed" -
+it's how argparse's short-flag bundling works for any option with variable
+arity, so it's simplest to just always write `-n` on its own.
 
 Examples
 
@@ -210,6 +237,18 @@ Note: Prometheus output is emitted in text exposition format suitable for scrapi
 All remote queries are read-only and do not require root or sudo on target nodes.
 
 If Slurm discovery fails or required utilities are missing, hpcat will print an error and fall back to user-supplied node lists when possible.
+
+### Running on a monitored node itself (no SSH)
+
+If a target node is the same host hpcat is running on, hpcat skips SSH entirely and runs the query directly. This matters for service accounts that either have no SSH key set up, or whose login shell is intentionally something like `/sbin/nologin` (common for accounts such as `zabbix`, which should not otherwise be able to SSH anywhere) - such an account can still monitor the local machine it's already running on without any SSH access at all. SSH is still used for every genuinely remote node.
+
+This is what the bare `-n` form (see [Targeting nodes](#targeting-nodes--n) above) is for in practice - `hpcat gpu -n -t -p` never resolves to anything but the local host, so it never needs SSH. Explicitly naming the local host (`hpcat gpu -n aibox`) gets the same result, since node identity for the SSH short-circuit is a separate check: the account's own hostname (`gethostname()`/`getfqdn()`, short and FQDN forms, case-insensitive) matched against whatever node name was targeted, however it was chosen.
+
+If you need to force SSH even for the local host - e.g. to test SSH trust independently of this shortcut - set `HPCAT_FORCE_SSH=1`:
+
+```bash
+HPCAT_FORCE_SSH=1 hpcat gpu -n aibox
+```
 
 ## Delta snapshots (net -d)
 

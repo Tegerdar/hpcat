@@ -12,10 +12,14 @@ HANDLERS = {
     "jobs": jobs,
 }
 
-NODES_HELP = "List of nodes to target (overrides Slurm discovery)"
+NODES_HELP = (
+    "Target nodes. Omit for Slurm discovery. Give names to target exactly "
+    "those nodes. Pass with no names (just -n) to target only the host "
+    "hpcat is running on, with no SSH involved."
+)
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="hpcat: Modern HPC Cluster Administration & Telemetry",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -47,13 +51,13 @@ GLOBAL OPTIONS:
         "gpu",
         help="Real-time GPU hardware telemetry via SSH",
     )
-    parser_gpu.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_gpu.add_argument("-n", "--nodes", nargs="*", metavar="NODE", help=NODES_HELP)
 
     parser_cpu = subparsers.add_parser(
         "cpu",
         help="CPU state",
     )
-    parser_cpu.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_cpu.add_argument("-n", "--nodes", nargs="*", metavar="NODE", help=NODES_HELP)
     parser_cpu.add_argument(
         "-e", "--extended",
         action="store_true",
@@ -64,7 +68,7 @@ GLOBAL OPTIONS:
         "mem",
         help="Memory usage and state",
     )
-    parser_mem.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_mem.add_argument("-n", "--nodes", nargs="*", metavar="NODE", help=NODES_HELP)
     parser_mem.add_argument(
         "-e", "--extended",
         action="store_true",
@@ -75,7 +79,7 @@ GLOBAL OPTIONS:
         "net",
         help="InfiniBand/RoCE link state and NIC error counters",
     )
-    parser_net.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_net.add_argument("-n", "--nodes", nargs="*", metavar="NODE", help=NODES_HELP)
     parser_net.add_argument(
         "-e", "--extended",
         action="store_true",
@@ -92,7 +96,7 @@ GLOBAL OPTIONS:
         "stg",
         help="Filesystem usage (df) plus BeeGFS/Lustre target-level detail",
     )
-    parser_stg.add_argument("-n", "--nodes", nargs="+", metavar="NODE", help=NODES_HELP)
+    parser_stg.add_argument("-n", "--nodes", nargs="*", metavar="NODE", help=NODES_HELP)
     parser_stg.add_argument(
         "-e", "--extended",
         action="store_true",
@@ -122,7 +126,11 @@ GLOBAL OPTIONS:
         format_group.add_argument("-c", "--csv", action="store_true", help="Output in flattened CSV format")
         format_group.add_argument("-p", "--prometheus", action="store_true", help="Output in Prometheus OpenMetrics format")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     try:
         sys.exit(HANDLERS[args.command].execute(args))
